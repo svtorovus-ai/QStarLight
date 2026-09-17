@@ -9,6 +9,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
       QSTAR_KEYSTORE_B64: ${{ secrets.QSTAR_KEYSTORE_B64 }}
       QSTAR_STORE_PASSWORD: ${{ secrets.QSTAR_STORE_PASSWORD }}
       QSTAR_KEY_ALIAS: ${{ secrets.QSTAR_KEY_ALIAS }}
@@ -23,11 +25,12 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android platform
-        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - name: Install Android SDK 35
+        shell: bash
+        run: |
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
 
       - name: Set up Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
