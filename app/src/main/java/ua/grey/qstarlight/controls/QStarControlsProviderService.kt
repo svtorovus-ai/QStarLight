@@ -113,6 +113,7 @@ class QStarControlsProviderService : ControlsProviderService() {
             BlePrefs.StrobeMode.TRIPLE -> "Потрійний"
             BlePrefs.StrobeMode.ALTERNATE -> "Ліво ↔ право"
             BlePrefs.StrobeMode.DOUBLE_ALTERNATE -> "Подвійний L/R"
+            else -> "Жовтий ↔ білий"
         }
         return "$mode • ${prefs.strobeBrightness}%"
     }
