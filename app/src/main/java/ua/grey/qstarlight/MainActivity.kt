@@ -563,7 +563,7 @@ class MainActivity : AppCompatActivity() {
         pendingConfigSync?.let(handler::removeCallbacks)
         val task = Runnable {
             ControlDispatcher.configChanged(this)
-            updateSyncStatus("Синхронізовано")
+            updateSyncStatus("Відправлено • очікую HUB")
         }
         pendingConfigSync = task
         handler.postDelayed(task, delayMs)

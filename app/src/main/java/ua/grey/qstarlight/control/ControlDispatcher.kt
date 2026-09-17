@@ -38,28 +38,36 @@ object ControlDispatcher {
         val prefs = BlePrefs(context).also { it.ensureDefaults() }
         prefs.white = white
         prefs.brightness = brightness
+        prefs.touchConfig()
         dispatch(context, CMD_APPLY, white = white, brightness = brightness)
+        configChanged(context)
         QStarWidgetProvider.refresh(context)
     }
 
     fun power(context: Context, on: Boolean) {
         val prefs = BlePrefs(context).also { it.ensureDefaults() }
         prefs.power = on
+        prefs.touchConfig()
         dispatch(context, CMD_POWER, power = on)
+        configChanged(context)
         QStarWidgetProvider.refresh(context)
     }
 
     fun brightnessSet(context: Context, value: Int) {
         val prefs = BlePrefs(context).also { it.ensureDefaults() }
         prefs.brightness = value.coerceIn(5, 100)
+        prefs.touchConfig()
         dispatch(context, CMD_APPLY, white = prefs.white, brightness = prefs.brightness)
+        configChanged(context)
         QStarWidgetProvider.refresh(context)
     }
 
     fun brightnessDelta(context: Context, delta: Int) {
         val prefs = BlePrefs(context).also { it.ensureDefaults() }
         prefs.brightness = (prefs.brightness + delta).coerceIn(5, 100)
+        prefs.touchConfig()
         dispatch(context, CMD_BRIGHTNESS_DELTA, delta = delta)
+        configChanged(context)
         QStarWidgetProvider.refresh(context)
     }
 

@@ -50,6 +50,8 @@ class RemoteLinkService : Service() {
     @Volatile private var updateInProgress = false
     private var lastAutoPushedVersion = -1L
     @Volatile private var pendingConfigRevision: Long? = null
+    @Volatile private var pendingConfigJson: JSONObject? = null
+    @Volatile private var configRetryScheduled = false
 
     override fun onCreate() {
         super.onCreate()
@@ -102,6 +104,10 @@ class RemoteLinkService : Service() {
         closeSocket()
         connected = false
         hubVersionCode = -1L
+        pendingConfigRevision = null
+        pendingConfigJson = null
+        configRetryScheduled = false
+        handler.removeCallbacksAndMessages(null)
         super.onDestroy()
     }
 
@@ -268,6 +274,8 @@ class RemoteLinkService : Service() {
                     val revision = json.optLong("revision", -1L)
                     if (pendingConfigRevision == revision) {
                         pendingConfigRevision = null
+                        pendingConfigJson = null
+                        configRetryScheduled = false
                         broadcast(EVENT_CONFIG_SYNC, "Налаштування підтверджено магнітолою", host, line)
                     }
                 }
@@ -355,14 +363,23 @@ class RemoteLinkService : Service() {
     }
 
     private fun sendConfigNow() {
+        val config = prefs.syncConfigJson()
+        pendingConfigRevision = config.optLong("revision", prefs.configRevision)
+        pendingConfigJson = config
+        sendPendingConfig()
+    }
+
+    private fun sendPendingConfig() {
+        val config = pendingConfigJson ?: return
         if (connected && writer != null) {
-            val config = prefs.syncConfigJson()
-            val revision = config.optLong("revision", prefs.configRevision)
-            pendingConfigRevision = revision
-            if (!sendLine(JSONObject().put("type", "config_sync").put("config", config))) {
-                pendingConfigRevision = null
-            }
+            sendLine(JSONObject().put("type", "config_sync").put("config", config))
         }
+        if (configRetryScheduled) return
+        configRetryScheduled = true
+        handler.postDelayed({
+            configRetryScheduled = false
+            if (pendingConfigJson != null) sendPendingConfig()
+        }, 1400)
     }
 
     private fun pushSelfUpdate(manual: Boolean) {

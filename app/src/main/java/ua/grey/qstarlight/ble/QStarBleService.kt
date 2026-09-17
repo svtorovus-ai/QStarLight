@@ -9,6 +9,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothDevice
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
 import android.content.Context
@@ -44,9 +45,14 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
     private var interactive = false
     private var oneShot = false
     private var scanActive = false
+    private var modernScanActive = false
+    private var legacyScanActive = false
+    private var scanDoneCallback: (() -> Unit)? = null
+    private var scanStopRunnable: Runnable? = null
     private var reconnectScheduled = false
     private var reconnectRounds = 0
     private val readyMacs = linkedSetOf<String>()
+    private var pairWasReady = false
     private var safetyFallbackActive = false
     private var bootPending = false
     private var latestCct: Pair<Int, Int>? = null
@@ -71,11 +77,18 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent == null) return START_NOT_STICKY
+        if (intent == null) {
+            interactive = true
+            oneShot = false
+            startForegroundSafe(if (prefs.role() == BlePrefs.Role.HUB) "Магнітола • QStar hub" else "Прямий BLE • QStar")
+            if (prefs.role() == BlePrefs.Role.HUB) ensureHubTransport()
+            if (!remoteTakeover) ensureConnections()
+            return START_STICKY
+        }
         when (intent.action) {
             ACTION_SCAN -> {
                 startForegroundSafe("Scanning QStar")
-                startScan(8_000)
+                startScan(8_000) { if (!remoteTakeover) ensureConnections() }
             }
             ACTION_HUB_START -> {
                 interactive = true
@@ -193,47 +206,113 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
             ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
     }
 
+    private fun handleDiscoveredDevice(device: BluetoothDevice, name: String?, rssi: Int) {
+        if (name?.startsWith("QStar~") != true) return
+        val ref = BlePrefs.DeviceRef(device.address, name)
+        discovered[device.address] = ref
+        prefs.updateMacByName(name, device.address)
+        event(EVENT_DEVICE_FOUND, device.address, name, "RSSI $rssi", rssi)
+    }
+
+    private val legacyScanCallback = BluetoothAdapter.LeScanCallback { device, rssi, _ ->
+        val name = try { device.name } catch (_: Throwable) { null }
+        handleDiscoveredDevice(device, name, rssi)
+    }
+
+    private fun startLegacyScan(): Boolean {
+        if (Build.VERSION.SDK_INT > 30 || legacyScanActive) return false
+        return try {
+            @Suppress("DEPRECATION")
+            val ok = adapter.startLeScan(legacyScanCallback)
+            legacyScanActive = ok
+            if (ok) event(EVENT_SCAN, message = "legacy_scan_started")
+            ok
+        } catch (t: Throwable) {
+            event(EVENT_ERROR, message = "Legacy BLE scan failed: ${t.javaClass.simpleName}: ${t.message.orEmpty()}")
+            false
+        }
+    }
+
     private fun startScan(durationMs: Long, onDone: (() -> Unit)? = null) {
-        if (!hasScanPermission() || !adapter.isEnabled || scanActive) {
+        if (scanActive) {
+            onDone?.invoke()
+            return
+        }
+        if (!hasScanPermission()) {
+            event(EVENT_ERROR, message = "BLE scan: немає дозволу Location / Nearby devices; пробую збережені MAC")
+            onDone?.invoke()
+            return
+        }
+        if (!adapter.isEnabled) {
+            event(EVENT_ERROR, message = "BLE scan: Bluetooth вимкнено")
             onDone?.invoke()
             return
         }
         scanActive = true
+        scanDoneCallback = onDone
         discovered.clear()
+        var started = false
         try {
-            adapter.bluetoothLeScanner.startScan(scanCallback)
-            event(EVENT_SCAN, message = "scan_started")
+            val scanner = adapter.bluetoothLeScanner
+            if (scanner != null) {
+                scanner.startScan(scanCallback)
+                modernScanActive = true
+                started = true
+                event(EVENT_SCAN, message = "scan_started")
+            }
         } catch (t: Throwable) {
-            event(EVENT_ERROR, message = "Scan failed: ${t.message}")
+            event(EVENT_ERROR, message = "BLE scan failed: ${t.javaClass.simpleName}: ${t.message.orEmpty()}")
+        }
+        if (!started) started = startLegacyScan()
+        if (!started) {
             scanActive = false
+            scanDoneCallback = null
             onDone?.invoke()
             return
         }
-        handler.postDelayed({
-            if (scanActive) {
-                try { adapter.bluetoothLeScanner.stopScan(scanCallback) } catch (_: Throwable) {}
-                scanActive = false
-                event(EVENT_SCAN, message = "scan_finished")
-            }
-            onDone?.invoke()
-            if (!interactive && !bootPending && connections.values.none { it.isReady() }) shutdownSoon()
-        }, durationMs)
+        val stop = Runnable { finishScan("scan_finished") }
+        scanStopRunnable = stop
+        handler.postDelayed(stop, durationMs)
+    }
+
+    private fun finishScan(message: String) {
+        scanStopRunnable?.let(handler::removeCallbacks)
+        scanStopRunnable = null
+        if (modernScanActive) {
+            try { adapter.bluetoothLeScanner?.stopScan(scanCallback) } catch (_: Throwable) { }
+            modernScanActive = false
+        }
+        if (legacyScanActive) {
+            try {
+                @Suppress("DEPRECATION")
+                adapter.stopLeScan(legacyScanCallback)
+            } catch (_: Throwable) { }
+            legacyScanActive = false
+        }
+        val wasActive = scanActive
+        scanActive = false
+        if (wasActive) event(EVENT_SCAN, message = message)
+        val callback = scanDoneCallback
+        scanDoneCallback = null
+        callback?.invoke()
+        if (!interactive && !bootPending && connections.values.none { it.isReady() }) shutdownSoon()
     }
 
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
-            val d = result.device
-            val name = result.scanRecord?.deviceName ?: try { d.name } catch (_: Throwable) { null }
-            if (name?.startsWith("QStar~") != true) return
-            val ref = BlePrefs.DeviceRef(d.address, name)
-            discovered[d.address] = ref
-            prefs.updateMacByName(name, d.address)
-            event(EVENT_DEVICE_FOUND, d.address, name, "RSSI ${result.rssi}", result.rssi)
+            val device = result.device
+            val name = result.scanRecord?.deviceName ?: try { device.name } catch (_: Throwable) { null }
+            handleDiscoveredDevice(device, name, result.rssi)
         }
 
         override fun onScanFailed(errorCode: Int) {
-            scanActive = false
             event(EVENT_ERROR, message = "BLE scan error $errorCode")
+            modernScanActive = false
+            if (Build.VERSION.SDK_INT <= 30 && !legacyScanActive && startLegacyScan()) {
+                event(EVENT_SCAN, message = "legacy_scan_fallback")
+                return
+            }
+            finishScan("scan_failed_$errorCode")
         }
     }
 
@@ -306,6 +385,10 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
                 return@postDelayed
             }
             reconnectRounds++
+            if (reconnectRounds % 5 == 0 && !scanActive && hasScanPermission() && adapter.isEnabled) {
+                startScan(2600) { ensureConnections() }
+                return@postDelayed
+            }
             prefs.devices().forEach { ref ->
                 if (connections[ref.mac]?.isReady() != true && connectingMac != ref.mac && connectPlan.none { it.mac == ref.mac }) connectPlan.add(ref)
             }
@@ -320,6 +403,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
             return
         }
         reconnectRounds = 0
+        pairWasReady = true
         if (bootPending) {
             bootPending = false
             runBootRoutine()
@@ -597,14 +681,19 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
 
     private fun startRssiLoop() {
         rssiLoop = true
+        var index = 0
         val task = object : Runnable {
             override fun run() {
                 if (!interactive) {
                     rssiLoop = false
                     return
                 }
-                connections.values.forEach { if (it.isReady()) it.readRssi() }
-                handler.postDelayed(this, 3_000)
+                val ready = prefs.devices().mapNotNull { connections[it.mac] }.filter { it.isReady() }
+                if (ready.isNotEmpty()) {
+                    ready[index % ready.size].readRssi()
+                    index++
+                }
+                handler.postDelayed(this, 4_500)
             }
         }
         handler.post(task)
@@ -634,7 +723,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         if (safetyFallbackActive && connection != null) {
             sendSafetyTo(connection) { handler.postDelayed({ pumpConnectPlan() }, 180) }
         } else {
-            handler.postDelayed({ pumpConnectPlan() }, 300)
+            handler.postDelayed({ pumpConnectPlan() }, 850)
         }
     }
 
@@ -659,16 +748,16 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         event(EVENT_ERROR, mac, connections[mac]?.name, message)
         val wasReady = readyMacs.remove(mac)
         if (connectingMac == mac) connectingMac = null
-        if (wasReady && !remoteTakeover) activateSafetyFallback("error:$message")
-        if (!remoteTakeover) scheduleReconnect(350)
+        if ((wasReady || pairWasReady) && !remoteTakeover) activateSafetyFallback("error:$message")
+        if (!remoteTakeover) scheduleReconnect(120)
     }
 
     override fun onDisconnected(mac: String, status: Int) {
         event(EVENT_DISCONNECTED, mac, connections[mac]?.name, "status=$status")
         val wasReady = readyMacs.remove(mac)
         if (connectingMac == mac) connectingMac = null
-        if (wasReady && !remoteTakeover) activateSafetyFallback("disconnect:$status")
-        if (!remoteTakeover) scheduleReconnect(300)
+        if ((wasReady || pairWasReady) && !remoteTakeover) activateSafetyFallback("disconnect:$status")
+        if (!remoteTakeover) scheduleReconnect(120)
     }
 
     private fun event(type: String, mac: String? = null, name: String? = null, message: String? = null, rssi: Int? = null) {

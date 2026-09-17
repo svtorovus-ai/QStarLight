@@ -155,7 +155,8 @@ class HubTransport(
                     "config_request" -> sendConfig(client)
                     "config_sync" -> {
                         val config = json.optJSONObject("config")
-                        if (config != null && listener.onRemoteConfig(config)) {
+                        if (config != null && config.optLong("revision", 0L) > 0L) {
+                            listener.onRemoteConfig(config)
                             writer.println(JSONObject().put("type", "config_ack").put("revision", config.optLong("revision", 0L)))
                             publishConfig()
                             publishStatus("Налаштування синхронізовано")

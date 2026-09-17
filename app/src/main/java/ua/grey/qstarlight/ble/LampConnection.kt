@@ -207,6 +207,7 @@ class LampConnection(
 
     private fun markReady() {
         if (closed || phase == Phase.READY) return
+        try { gatt?.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_BALANCED) } catch (_: Throwable) { }
         setPhase(Phase.READY)
         listener.onReady(mac)
     }
@@ -243,7 +244,7 @@ class LampConnection(
                 }
             }
             activeOpTimeout = timeout
-            handler.postDelayed(timeout, 2500)
+            handler.postDelayed(timeout, 6000)
         }
     }
 
