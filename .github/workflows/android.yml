@@ -8,6 +8,11 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      QSTAR_KEYSTORE_B64: ${{ secrets.QSTAR_KEYSTORE_B64 }}
+      QSTAR_STORE_PASSWORD: ${{ secrets.QSTAR_STORE_PASSWORD }}
+      QSTAR_KEY_ALIAS: ${{ secrets.QSTAR_KEY_ALIAS }}
+      QSTAR_KEY_PASSWORD: ${{ secrets.QSTAR_KEY_PASSWORD }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -30,44 +35,41 @@ jobs:
           gradle-version: '8.9'
 
       - name: Restore stable signing key
-        if: ${{ secrets.QSTAR_KEYSTORE_B64 != '' }}
+        if: ${{ env.QSTAR_KEYSTORE_B64 != '' }}
         run: |
           mkdir -p signing
-          printf '%s' '${{ secrets.QSTAR_KEYSTORE_B64 }}' | base64 -d > signing/qstarlight-update.jks
+          printf '%s' "$QSTAR_KEYSTORE_B64" | base64 -d > signing/qstarlight-update.jks
 
       - name: Unit tests
         run: gradle :app:testDebugUnitTest --stacktrace
 
       - name: Build debug APK
-        if: ${{ secrets.QSTAR_KEYSTORE_B64 == '' }}
+        if: ${{ env.QSTAR_KEYSTORE_B64 == '' }}
         run: gradle :app:assembleDebug --stacktrace
 
       - name: Build stable release APK
-        if: ${{ secrets.QSTAR_KEYSTORE_B64 != '' }}
+        if: ${{ env.QSTAR_KEYSTORE_B64 != '' }}
         env:
           QSTAR_KEYSTORE_FILE: signing/qstarlight-update.jks
-          QSTAR_STORE_PASSWORD: ${{ secrets.QSTAR_STORE_PASSWORD }}
-          QSTAR_KEY_ALIAS: ${{ secrets.QSTAR_KEY_ALIAS }}
-          QSTAR_KEY_PASSWORD: ${{ secrets.QSTAR_KEY_PASSWORD }}
         run: gradle :app:assembleRelease --stacktrace
 
       - name: Verify debug APK
-        if: ${{ secrets.QSTAR_KEYSTORE_B64 == '' }}
+        if: ${{ env.QSTAR_KEYSTORE_B64 == '' }}
         run: unzip -t app/build/outputs/apk/debug/app-debug.apk >/dev/null
 
       - name: Verify release APK
-        if: ${{ secrets.QSTAR_KEYSTORE_B64 != '' }}
+        if: ${{ env.QSTAR_KEYSTORE_B64 != '' }}
         run: unzip -t app/build/outputs/apk/release/app-release.apk >/dev/null
 
       - name: Upload debug APK
-        if: ${{ secrets.QSTAR_KEYSTORE_B64 == '' }}
+        if: ${{ env.QSTAR_KEYSTORE_B64 == '' }}
         uses: actions/upload-artifact@v4
         with:
           name: QStarLight-debug
           path: app/build/outputs/apk/debug/app-debug.apk
 
       - name: Upload stable release APK
-        if: ${{ secrets.QSTAR_KEYSTORE_B64 != '' }}
+        if: ${{ env.QSTAR_KEYSTORE_B64 != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: QStarLight-release
