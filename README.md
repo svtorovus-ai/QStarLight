@@ -48,7 +48,3 @@ This archive does not contain a Gradle wrapper binary or Android SDK. Android St
 
 ## Hardware limit
 Software can improve reconnect/retry behavior but cannot repair genuinely weak RF. The boot fade can only start after Android has booted and BLE has connected to the controllers. It cannot animate before the head unit/phone is alive.
-
-## Signing and OTA updates
-
-The update signing key is intentionally not stored in this repository. Stable APK updates must use the same signing key as the version already installed on the phone and head unit. GitHub Actions can build a stable release when the repository secrets `QSTAR_KEYSTORE_B64`, `QSTAR_STORE_PASSWORD`, `QSTAR_KEY_ALIAS`, and `QSTAR_KEY_PASSWORD` are configured. Without them, CI builds a debug APK only.

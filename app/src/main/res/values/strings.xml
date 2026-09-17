@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">QStar Light</string>
+    <string name="title">QStar Light</string>
+    <string name="subtitle">YOBIS / QStar, дві BLE-лампи</string>
+    <string name="devices">Лампи</string>
+    <string name="connect">Підключити</string>
+    <string name="scan">Скан</string>
+    <string name="select">Вибрати 2</string>
+    <string name="power">Живлення</string>
+    <string name="yellow">Жовтий</string>
+    <string name="warm">Теплий</string>
+    <string name="white">Білий</string>
+    <string name="temperature">Суміш білий / жовтий</string>
+    <string name="brightness">Яскравість</string>
+    <string name="temp_value">Білий %1$d%%   Жовтий %2$d%%</string>
+    <string name="brightness_value">Яскравість %1$d%%</string>
+    <string name="passwords">Паролі</string>
+    <string name="boot_fade">Після запуску: жовтий → збережений колір</string>
+    <string name="keep_connected">Тримати BLE підключеним у фоні</string>
+    <string name="diagnostics">Діагностика</string>
+    <string name="status_waiting">очікування</string>
+    <string name="no_devices">Лампи не вибрані</string>
+    <string name="scan_first">Спочатку проскануй QStar</string>
+    <string name="choose_devices">Вибери до двох QStar-ламп</string>
+    <string name="only_two">Можна вибрати максимум дві лампи</string>
+    <string name="widget_description">Швидке керування QStar-фарами</string>
+</resources>

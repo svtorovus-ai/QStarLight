@@ -1,0 +1,758 @@
+package ua.grey.qstarlight.ble
+
+import android.Manifest
+import android.annotation.SuppressLint
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothManager
+import android.bluetooth.le.ScanCallback
+import android.bluetooth.le.ScanResult
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
+import android.os.Handler
+import android.os.IBinder
+import android.os.Looper
+import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
+import org.json.JSONObject
+import ua.grey.qstarlight.MainActivity
+import ua.grey.qstarlight.R
+import ua.grey.qstarlight.control.ControlActionReceiver
+import ua.grey.qstarlight.control.ControlDispatcher
+import ua.grey.qstarlight.remote.HubTransport
+import java.util.ArrayDeque
+import java.util.LinkedHashMap
+
+@SuppressLint("MissingPermission")
+class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listener {
+    private val handler = Handler(Looper.getMainLooper())
+    private lateinit var prefs: BlePrefs
+    private lateinit var adapter: BluetoothAdapter
+
+    private val connections = LinkedHashMap<String, LampConnection>()
+    private val discovered = LinkedHashMap<String, BlePrefs.DeviceRef>()
+    private val connectPlan = ArrayDeque<BlePrefs.DeviceRef>()
+    private var connectingMac: String? = null
+    private var interactive = false
+    private var oneShot = false
+    private var scanActive = false
+    private var bootPending = false
+    private var latestCct: Pair<Int, Int>? = null
+    private var sendingCct = false
+    private var rssiLoop = false
+    private var hubTransport: HubTransport? = null
+    private var remoteTakeover = false
+
+    private var strobeActive = false
+    private var strobeGeneration = 0L
+
+    override fun onCreate() {
+        super.onCreate()
+        prefs = BlePrefs(this).also { it.ensureDefaults() }
+        adapter = (getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
+        createNotificationChannel()
+        if (prefs.role() == BlePrefs.Role.HUB) {
+            hubTransport = HubTransport(this, prefs, this)
+        }
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent == null) return START_NOT_STICKY
+        when (intent.action) {
+            ACTION_SCAN -> {
+                startForegroundSafe("Scanning QStar")
+                startScan(8_000)
+            }
+            ACTION_HUB_START -> {
+                interactive = true
+                oneShot = false
+                startForegroundSafe("Магнітола • QStar hub")
+                ensureHubTransport()
+                if (!remoteTakeover) ensureConnections()
+            }
+            ACTION_CONNECT -> {
+                interactive = true
+                oneShot = false
+                startForegroundSafe(if (prefs.role() == BlePrefs.Role.HUB) "Магнітола • QStar" else "Прямий BLE • QStar")
+                if (prefs.role() == BlePrefs.Role.HUB) ensureHubTransport()
+                if (!remoteTakeover) ensureConnections()
+            }
+            ACTION_RELEASE -> {
+                stopStrobeInternal(restore = false)
+                if (prefs.role() == BlePrefs.Role.HUB && !remoteTakeover) {
+                    interactive = true
+                } else {
+                    interactive = false
+                    disconnectAll()
+                    if (!prefs.keepConnected || prefs.role() == BlePrefs.Role.PHONE) shutdownSoon()
+                }
+            }
+            ACTION_APPLY -> {
+                stopStrobeInternal(restore = false)
+                prefs.white = intent.getIntExtra(EXTRA_WHITE, prefs.white)
+                prefs.brightness = intent.getIntExtra(EXTRA_BRIGHTNESS, prefs.brightness)
+                oneShot = intent.getBooleanExtra(EXTRA_ONE_SHOT, false)
+                startForegroundSafe("Applying light settings")
+                latestCct = prefs.white to prefs.brightness
+                ensureConnections()
+            }
+            ACTION_POWER -> {
+                stopStrobeInternal(restore = false)
+                prefs.power = intent.getBooleanExtra(EXTRA_POWER, prefs.power)
+                oneShot = intent.getBooleanExtra(EXTRA_ONE_SHOT, false)
+                startForegroundSafe("Changing light power")
+                ensureConnections { sendPower(prefs.power) }
+            }
+            ACTION_PRESET -> {
+                stopStrobeInternal(restore = false)
+                prefs.white = intent.getIntExtra(EXTRA_WHITE, prefs.white).coerceIn(0, 100)
+                oneShot = intent.getBooleanExtra(EXTRA_ONE_SHOT, !interactive)
+                startForegroundSafe("Applying preset")
+                latestCct = prefs.white to prefs.brightness
+                ensureConnections()
+            }
+            ACTION_BRIGHTNESS_DELTA -> {
+                stopStrobeInternal(restore = false)
+                prefs.brightness = (prefs.brightness + intent.getIntExtra(EXTRA_DELTA, 0)).coerceIn(5, 100)
+                oneShot = intent.getBooleanExtra(EXTRA_ONE_SHOT, !interactive)
+                startForegroundSafe("Changing brightness")
+                latestCct = prefs.white to prefs.brightness
+                ensureConnections()
+            }
+            ACTION_STROBE -> {
+                val requested = if (intent.hasExtra(EXTRA_STROBE_ENABLED)) {
+                    intent.getBooleanExtra(EXTRA_STROBE_ENABLED, false)
+                } else !strobeActive
+                startForegroundSafe(if (requested) "Стробоскоп" else "QStar")
+                if (requested) startStrobe() else stopStrobeInternal(restore = true)
+            }
+            ACTION_CONFIG_CHANGED -> {
+                ensureHubTransport()
+                hubTransport?.publishConfig()
+                hubTransport?.publishStatus("Налаштування оновлено")
+            }
+            ACTION_BOOT -> {
+                if (!prefs.autoBoot) {
+                    stopSelf()
+                    return START_NOT_STICKY
+                }
+                if (prefs.role() == BlePrefs.Role.HUB) {
+                    interactive = true
+                    oneShot = false
+                    ensureHubTransport()
+                } else {
+                    oneShot = true
+                }
+                bootPending = true
+                startForegroundSafe("Відновлення QStar")
+                startScan(4_000) { if (!remoteTakeover) ensureConnections() }
+            }
+        }
+        return START_NOT_STICKY
+    }
+
+    private fun ensureHubTransport() {
+        if (prefs.role() != BlePrefs.Role.HUB) return
+        if (hubTransport == null) hubTransport = HubTransport(this, prefs, this)
+        hubTransport?.start()
+        hubTransport?.publishStatus(if (remoteTakeover) "Телефон керує напряму" else "Магнітола керує лампами")
+    }
+
+    private fun disconnectAll() {
+        connections.values.forEach { it.disconnect() }
+        connections.clear()
+        connectPlan.clear()
+        connectingMac = null
+    }
+
+    private fun hasScanPermission(): Boolean {
+        return if (Build.VERSION.SDK_INT >= 31) {
+            ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED
+        } else {
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    private fun hasConnectPermission(): Boolean {
+        return Build.VERSION.SDK_INT < 31 ||
+            ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun startScan(durationMs: Long, onDone: (() -> Unit)? = null) {
+        if (!hasScanPermission() || !adapter.isEnabled || scanActive) {
+            onDone?.invoke()
+            return
+        }
+        scanActive = true
+        discovered.clear()
+        try {
+            adapter.bluetoothLeScanner.startScan(scanCallback)
+            event(EVENT_SCAN, message = "scan_started")
+        } catch (t: Throwable) {
+            event(EVENT_ERROR, message = "Scan failed: ${t.message}")
+            scanActive = false
+            onDone?.invoke()
+            return
+        }
+        handler.postDelayed({
+            if (scanActive) {
+                try { adapter.bluetoothLeScanner.stopScan(scanCallback) } catch (_: Throwable) {}
+                scanActive = false
+                event(EVENT_SCAN, message = "scan_finished")
+            }
+            onDone?.invoke()
+            if (!interactive && !bootPending && connections.values.none { it.isReady() }) shutdownSoon()
+        }, durationMs)
+    }
+
+    private val scanCallback = object : ScanCallback() {
+        override fun onScanResult(callbackType: Int, result: ScanResult) {
+            val d = result.device
+            val name = result.scanRecord?.deviceName ?: try { d.name } catch (_: Throwable) { null }
+            if (name?.startsWith("QStar~") != true) return
+            val ref = BlePrefs.DeviceRef(d.address, name)
+            discovered[d.address] = ref
+            prefs.updateMacByName(name, d.address)
+            event(EVENT_DEVICE_FOUND, d.address, name, "RSSI ${result.rssi}", result.rssi)
+        }
+
+        override fun onScanFailed(errorCode: Int) {
+            scanActive = false
+            event(EVENT_ERROR, message = "BLE scan error $errorCode")
+        }
+    }
+
+    private fun ensureConnections(afterReady: (() -> Unit)? = null) {
+        if (remoteTakeover) {
+            afterReady?.invoke()
+            return
+        }
+        if (!hasConnectPermission() || !adapter.isEnabled) {
+            event(EVENT_ERROR, message = "Bluetooth permission or adapter missing")
+            if (oneShot) shutdownSoon()
+            return
+        }
+        val refs = prefs.devices()
+        if (refs.isEmpty()) {
+            event(EVENT_ERROR, message = "No QStar devices selected")
+            if (oneShot) shutdownSoon()
+            return
+        }
+
+        connectPlan.clear()
+        refs.forEach { ref ->
+            val existing = connections[ref.mac]
+            if (existing == null || !existing.isReady()) connectPlan.add(ref)
+        }
+
+        if (connectPlan.isEmpty()) {
+            afterReady?.invoke()
+            onAllReady()
+        } else {
+            pendingAfterReady = afterReady
+            pumpConnectPlan()
+        }
+    }
+
+    private var pendingAfterReady: (() -> Unit)? = null
+
+    private fun pumpConnectPlan() {
+        if (connectingMac != null) return
+        while (connectPlan.isNotEmpty()) {
+            val ref = connectPlan.removeFirst()
+            if (connections[ref.mac]?.isReady() == true) continue
+            val device = try { adapter.getRemoteDevice(ref.mac) }
+            catch (_: Throwable) { continue }
+            val connection = LampConnection(this, device, prefs::password, this)
+            connections[ref.mac]?.disconnect()
+            connections[ref.mac] = connection
+            connectingMac = ref.mac
+            connection.connect()
+            handler.postDelayed({
+                if (connectingMac == ref.mac && !connection.isReady()) {
+                    event(EVENT_ERROR, ref.mac, ref.name, "Connect timeout")
+                    connection.disconnect()
+                    connectingMac = null
+                    handler.postDelayed({ pumpConnectPlan() }, 300)
+                }
+            }, 7_000)
+            return
+        }
+        val callback = pendingAfterReady
+        pendingAfterReady = null
+        callback?.invoke()
+        onAllReady()
+    }
+
+    private fun onAllReady() {
+        if (bootPending) {
+            bootPending = false
+            runBootRoutine()
+            return
+        }
+        pumpLatestCct()
+        if (interactive && !rssiLoop) startRssiLoop()
+    }
+
+    private fun pumpLatestCct() {
+        if (sendingCct || strobeActive) return
+        val desired = latestCct ?: return
+        latestCct = null
+        sendingCct = true
+        sendFrameAll(QStarProtocol.cctFrame(desired.first, desired.second)) {
+            sendingCct = false
+            if (latestCct != null) {
+                handler.postDelayed({ pumpLatestCct() }, 60)
+            } else if (oneShot) {
+                shutdownSoon()
+            }
+        }
+    }
+
+    private fun sendPower(on: Boolean, done: (() -> Unit)? = null) {
+        sendFrameAll(if (on) QStarProtocol.POWER_ON else QStarProtocol.POWER_OFF) {
+            done?.invoke()
+            if (oneShot) shutdownSoon()
+        }
+    }
+
+    private fun sendFrameAll(frame: ByteArray, done: () -> Unit) {
+        val list = prefs.devices().mapNotNull { connections[it.mac] }.filter { it.isReady() }
+        if (list.isEmpty()) {
+            event(EVENT_ERROR, message = "No ready QStar connection")
+            done()
+            return
+        }
+        fun sendAt(index: Int) {
+            if (index >= list.size) {
+                done()
+                return
+            }
+            val c = list[index]
+            c.writeControl(frame) { ok ->
+                event(if (ok) EVENT_WRITE else EVENT_ERROR, c.mac, c.name, QStarProtocol.hex(frame))
+                handler.postDelayed({ sendAt(index + 1) }, 35)
+            }
+        }
+        sendAt(0)
+    }
+
+    private fun applyPowerStates(states: List<Boolean>, done: () -> Unit) {
+        val refs = prefs.devices()
+        fun sendAt(index: Int) {
+            if (index >= refs.size) { done(); return }
+            val connection = connections[refs[index].mac]
+            if (connection == null || !connection.isReady()) {
+                sendAt(index + 1)
+                return
+            }
+            val state = states.getOrElse(index) { false }
+            val frame = if (state) QStarProtocol.POWER_ON else QStarProtocol.POWER_OFF
+            connection.writeControl(frame) {
+                handler.postDelayed({ sendAt(index + 1) }, 25)
+            }
+        }
+        sendAt(0)
+    }
+
+    private fun runBootRoutine() {
+        stopStrobeInternal(restore = false)
+        when (prefs.startupMode) {
+            BlePrefs.StartupMode.OFF -> {
+                prefs.power = false
+                sendFrameAll(QStarProtocol.POWER_OFF) { finishBootRoutine() }
+            }
+            BlePrefs.StartupMode.RESTORE -> {
+                if (!prefs.power) {
+                    sendFrameAll(QStarProtocol.POWER_OFF) { finishBootRoutine() }
+                } else {
+                    sendFrameAll(QStarProtocol.POWER_ON) {
+                        sendFrameAll(QStarProtocol.cctFrame(prefs.white, prefs.brightness)) { finishBootRoutine() }
+                    }
+                }
+            }
+            BlePrefs.StartupMode.START_ONLY -> {
+                prefs.power = true
+                prefs.white = prefs.startWhite
+                prefs.brightness = prefs.startBrightness
+                sendFrameAll(QStarProtocol.POWER_ON) {
+                    sendFrameAll(QStarProtocol.cctFrame(prefs.startWhite, prefs.startBrightness)) { finishBootRoutine() }
+                }
+            }
+            BlePrefs.StartupMode.FADE_TO_TARGET -> {
+                prefs.power = true
+                prefs.brightness = prefs.startBrightness
+                sendFrameAll(QStarProtocol.POWER_ON) {
+                    sendFrameAll(QStarProtocol.cctFrame(prefs.startWhite, prefs.startBrightness)) {
+                        if (prefs.fadeDurationMs <= 0 || prefs.startWhite == prefs.targetWhite) {
+                            prefs.white = prefs.targetWhite
+                            sendFrameAll(QStarProtocol.cctFrame(prefs.targetWhite, prefs.startBrightness)) { finishBootRoutine() }
+                        } else {
+                            val steps = prefs.fadeSteps.coerceAtLeast(2)
+                            val delay = (prefs.fadeDurationMs / steps).coerceAtLeast(20)
+                            handler.postDelayed({ fadeStep(1, steps, prefs.startWhite, prefs.targetWhite, prefs.startBrightness, delay) }, 120)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun fadeStep(step: Int, total: Int, startWhite: Int, targetWhite: Int, brightness: Int, delayMs: Int) {
+        val white = (startWhite + (targetWhite - startWhite) * step / total).coerceIn(0, 100)
+        sendFrameAll(QStarProtocol.cctFrame(white, brightness)) {
+            if (step >= total) {
+                prefs.white = targetWhite
+                prefs.brightness = brightness
+                finishBootRoutine()
+            } else {
+                handler.postDelayed({ fadeStep(step + 1, total, startWhite, targetWhite, brightness, delayMs) }, delayMs.toLong())
+            }
+        }
+    }
+
+    private fun finishBootRoutine() {
+        if (prefs.role() == BlePrefs.Role.HUB) hubTransport?.publishStatus("QStar готові") else shutdownSoon()
+    }
+
+    private data class StrobeStep(val states: List<Boolean>, val delayMs: Int)
+
+    private fun startStrobe() {
+        oneShot = false
+        interactive = true
+        strobeActive = true
+        strobeGeneration++
+        val generation = strobeGeneration
+        prefs.power = true
+        ensureConnections {
+            sendFrameAll(QStarProtocol.cctFrame(prefs.strobeWhite, prefs.strobeBrightness)) {
+                if (strobeActive && generation == strobeGeneration) {
+                    event(EVENT_STROBE, message = "strobe_on:${prefs.strobeMode.name}")
+                    runStrobeSequence(generation, 0)
+                }
+            }
+        }
+    }
+
+    private fun stopStrobeInternal(restore: Boolean) {
+        if (!strobeActive && !restore) return
+        strobeActive = false
+        strobeGeneration++
+        event(EVENT_STROBE, message = "strobe_off")
+        if (restore) {
+            ensureConnections {
+                sendFrameAll(QStarProtocol.cctFrame(prefs.white, prefs.brightness)) {
+                    sendFrameAll(if (prefs.power) QStarProtocol.POWER_ON else QStarProtocol.POWER_OFF) { }
+                }
+            }
+        }
+    }
+
+    private fun strobeSequence(): List<StrobeStep> {
+        val count = prefs.devices().size.coerceAtLeast(1)
+        val allOn = List(count) { true }
+        val allOff = List(count) { false }
+        val on = prefs.strobeOnMs
+        val off = prefs.strobeOffMs
+        val pause = prefs.strobePauseMs
+        return when (prefs.strobeMode) {
+            BlePrefs.StrobeMode.CLASSIC -> listOf(
+                StrobeStep(allOn, on), StrobeStep(allOff, off)
+            )
+            BlePrefs.StrobeMode.DOUBLE -> listOf(
+                StrobeStep(allOn, on), StrobeStep(allOff, off),
+                StrobeStep(allOn, on), StrobeStep(allOff, pause)
+            )
+            BlePrefs.StrobeMode.TRIPLE -> listOf(
+                StrobeStep(allOn, on), StrobeStep(allOff, off),
+                StrobeStep(allOn, on), StrobeStep(allOff, off),
+                StrobeStep(allOn, on), StrobeStep(allOff, pause)
+            )
+            BlePrefs.StrobeMode.ALTERNATE -> {
+                if (count < 2) listOf(StrobeStep(allOn, on), StrobeStep(allOff, off))
+                else listOf(
+                    StrobeStep(listOf(true, false), on), StrobeStep(allOff, off),
+                    StrobeStep(listOf(false, true), on), StrobeStep(allOff, pause)
+                )
+            }
+            BlePrefs.StrobeMode.DOUBLE_ALTERNATE -> {
+                if (count < 2) listOf(
+                    StrobeStep(allOn, on), StrobeStep(allOff, off),
+                    StrobeStep(allOn, on), StrobeStep(allOff, pause)
+                ) else listOf(
+                    StrobeStep(listOf(true, false), on), StrobeStep(allOff, off),
+                    StrobeStep(listOf(true, false), on), StrobeStep(allOff, pause / 2),
+                    StrobeStep(listOf(false, true), on), StrobeStep(allOff, off),
+                    StrobeStep(listOf(false, true), on), StrobeStep(allOff, pause)
+                )
+            }
+        }
+    }
+
+    private fun runStrobeSequence(generation: Long, index: Int) {
+        if (!strobeActive || generation != strobeGeneration) return
+        val seq = strobeSequence()
+        if (seq.isEmpty()) return
+        val stepIndex = index % seq.size
+        val step = seq[stepIndex]
+        applyPowerStates(step.states) {
+            if (!strobeActive || generation != strobeGeneration) return@applyPowerStates
+            handler.postDelayed({ runStrobeSequence(generation, (stepIndex + 1) % seq.size) }, step.delayMs.toLong())
+        }
+    }
+
+    private fun startRssiLoop() {
+        rssiLoop = true
+        val task = object : Runnable {
+            override fun run() {
+                if (!interactive) {
+                    rssiLoop = false
+                    return
+                }
+                connections.values.forEach { if (it.isReady()) it.readRssi() }
+                handler.postDelayed(this, 3_000)
+            }
+        }
+        handler.post(task)
+    }
+
+    private fun shutdownSoon() {
+        if (prefs.role() == BlePrefs.Role.HUB && interactive && !remoteTakeover) return
+        handler.postDelayed({
+            if (!interactive || oneShot) {
+                connections.values.forEach { it.disconnect() }
+                connections.clear()
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            }
+        }, 1_200)
+    }
+
+    override fun onPhase(mac: String, phase: LampConnection.Phase) {
+        event(EVENT_PHASE, mac, connections[mac]?.name, phase.name)
+    }
+
+    override fun onReady(mac: String) {
+        event(EVENT_READY, mac, connections[mac]?.name, "ready")
+        if (connectingMac == mac) connectingMac = null
+        handler.postDelayed({ pumpConnectPlan() }, 550)
+    }
+
+    override fun onState(mac: String, state: QStarProtocol.LampState) {
+        event(
+            EVENT_STATE,
+            mac,
+            connections[mac]?.name,
+            "${if (state.power) "ON" else "OFF"} W=${state.white} Y=${state.yellow} B=${state.brightness} M=${state.mode}"
+        )
+    }
+
+    override fun onPasswordRequired(mac: String, required: Boolean) {
+        event(EVENT_PASSWORD, mac, connections[mac]?.name, if (required) "password_required" else "password_off")
+    }
+
+    override fun onRssi(mac: String, rssi: Int) {
+        event(EVENT_RSSI, mac, connections[mac]?.name, "RSSI $rssi", rssi)
+    }
+
+    override fun onError(mac: String, message: String) {
+        event(EVENT_ERROR, mac, connections[mac]?.name, message)
+        if (connectingMac == mac) {
+            connectingMac = null
+            handler.postDelayed({ pumpConnectPlan() }, 300)
+        }
+    }
+
+    override fun onDisconnected(mac: String, status: Int) {
+        event(EVENT_DISCONNECTED, mac, connections[mac]?.name, "status=$status")
+        if (interactive && !remoteTakeover) {
+            val ref = prefs.devices().firstOrNull { it.mac == mac } ?: return
+            handler.postDelayed({
+                if (connections[mac]?.isReady() != true && !connectPlan.any { it.mac == mac }) {
+                    connectPlan.add(ref)
+                    pumpConnectPlan()
+                }
+            }, 1_500)
+        }
+    }
+
+    private fun event(type: String, mac: String? = null, name: String? = null, message: String? = null, rssi: Int? = null) {
+        val i = Intent(ACTION_EVENT).setPackage(packageName)
+            .putExtra(EXTRA_EVENT, type)
+            .putExtra(EXTRA_MAC, mac)
+            .putExtra(EXTRA_NAME, name)
+            .putExtra(EXTRA_MESSAGE, message)
+        if (rssi != null) i.putExtra(EXTRA_RSSI, rssi)
+        sendBroadcast(i)
+        hubTransport?.publishBle(type, mac, name, message)
+    }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= 26) {
+            val nm = getSystemService(NotificationManager::class.java)
+            nm.createNotificationChannel(
+                NotificationChannel(CHANNEL_ID, "QStar BLE", NotificationManager.IMPORTANCE_LOW)
+            )
+        }
+    }
+
+    private fun startForegroundSafe(text: String) {
+        val openIntent = PendingIntent.getActivity(
+            this, 0, Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val notification: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_headlight)
+            .setContentTitle(getString(R.string.app_name))
+            .setContentText(text)
+            .setOngoing(true)
+            .setContentIntent(openIntent)
+            .addAction(0, "🟡", presetPendingIntent(0, 7011))
+            .addAction(0, "Теплий", presetPendingIntent(50, 7012))
+            .addAction(0, "⚪", presetPendingIntent(100, 7013))
+            .addAction(0, "⚡", strobePendingIntent(7014))
+            .build()
+        startForeground(NOTIFICATION_ID, notification)
+    }
+
+    private fun presetPendingIntent(white: Int, requestCode: Int): PendingIntent {
+        val i = Intent(this, ControlActionReceiver::class.java)
+            .setAction(ControlActionReceiver.ACTION_PRESET)
+            .putExtra(ControlActionReceiver.EXTRA_WHITE, white)
+        return PendingIntent.getBroadcast(
+            this, requestCode, i, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+    }
+
+    private fun strobePendingIntent(requestCode: Int): PendingIntent {
+        val i = Intent(this, ControlActionReceiver::class.java).setAction(ControlActionReceiver.ACTION_STROBE)
+        return PendingIntent.getBroadcast(this, requestCode, i, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+    }
+
+    override fun onRemoteCommand(command: String, payload: JSONObject) {
+        handler.post {
+            when (command) {
+                ControlDispatcher.CMD_PRESET -> {
+                    stopStrobeInternal(restore = false)
+                    prefs.white = payload.optInt("white", prefs.white).coerceIn(0, 100)
+                    latestCct = prefs.white to prefs.brightness
+                    ensureConnections()
+                }
+                ControlDispatcher.CMD_APPLY -> {
+                    stopStrobeInternal(restore = false)
+                    prefs.white = payload.optInt("white", prefs.white).coerceIn(0, 100)
+                    prefs.brightness = payload.optInt("brightness", prefs.brightness).coerceIn(5, 100)
+                    latestCct = prefs.white to prefs.brightness
+                    ensureConnections()
+                }
+                ControlDispatcher.CMD_POWER -> {
+                    stopStrobeInternal(restore = false)
+                    prefs.power = payload.optBoolean("power", prefs.power)
+                    ensureConnections { sendPower(prefs.power) }
+                }
+                ControlDispatcher.CMD_BRIGHTNESS_DELTA -> {
+                    stopStrobeInternal(restore = false)
+                    prefs.brightness = (prefs.brightness + payload.optInt("delta", 0)).coerceIn(5, 100)
+                    latestCct = prefs.white to prefs.brightness
+                    ensureConnections()
+                }
+                ControlDispatcher.CMD_STROBE -> {
+                    val enabled = if (payload.has("enabled")) payload.optBoolean("enabled") else !strobeActive
+                    if (enabled) startStrobe() else stopStrobeInternal(restore = true)
+                }
+                ControlDispatcher.CMD_CONNECT -> ensureConnections()
+            }
+            hubTransport?.publishStatus("Команда з телефону")
+        }
+    }
+
+    override fun onTakeoverChanged(active: Boolean) {
+        handler.post {
+            remoteTakeover = active
+            stopStrobeInternal(restore = false)
+            if (active) {
+                disconnectAll()
+                event(EVENT_PHASE, message = "remote_direct_takeover")
+            } else {
+                interactive = true
+                event(EVENT_PHASE, message = "hub_control_resumed")
+                ensureConnections()
+            }
+        }
+    }
+
+    override fun onRemoteConfig(config: JSONObject): Boolean {
+        val changed = prefs.applySyncConfig(config)
+        if (changed) handler.post { event(EVENT_CONFIG_SYNC, message = "config_from_phone") }
+        return changed
+    }
+
+    override fun onUpdateStatus(text: String) {
+        handler.post { event(EVENT_UPDATE, message = text) }
+    }
+
+    override fun onDestroy() {
+        strobeActive = false
+        strobeGeneration++
+        hubTransport?.stop()
+        hubTransport = null
+        disconnectAll()
+        super.onDestroy()
+    }
+
+    companion object {
+        const val ACTION_HUB_START = "ua.grey.qstarlight.HUB_START"
+        const val ACTION_SCAN = "ua.grey.qstarlight.SCAN"
+        const val ACTION_CONNECT = "ua.grey.qstarlight.CONNECT"
+        const val ACTION_RELEASE = "ua.grey.qstarlight.RELEASE"
+        const val ACTION_APPLY = "ua.grey.qstarlight.APPLY"
+        const val ACTION_POWER = "ua.grey.qstarlight.POWER"
+        const val ACTION_PRESET = "ua.grey.qstarlight.PRESET"
+        const val ACTION_BRIGHTNESS_DELTA = "ua.grey.qstarlight.BRIGHTNESS_DELTA"
+        const val ACTION_STROBE = "ua.grey.qstarlight.STROBE"
+        const val ACTION_CONFIG_CHANGED = "ua.grey.qstarlight.CONFIG_CHANGED"
+        const val ACTION_BOOT = "ua.grey.qstarlight.BOOT"
+        const val ACTION_EVENT = "ua.grey.qstarlight.EVENT"
+
+        const val EXTRA_WHITE = "white"
+        const val EXTRA_BRIGHTNESS = "brightness"
+        const val EXTRA_POWER = "power"
+        const val EXTRA_ONE_SHOT = "one_shot"
+        const val EXTRA_DELTA = "delta"
+        const val EXTRA_STROBE_ENABLED = "strobe_enabled"
+        const val EXTRA_EVENT = "event"
+        const val EXTRA_MAC = "mac"
+        const val EXTRA_NAME = "name"
+        const val EXTRA_MESSAGE = "message"
+        const val EXTRA_RSSI = "rssi"
+
+        const val EVENT_DEVICE_FOUND = "device_found"
+        const val EVENT_SCAN = "scan"
+        const val EVENT_PHASE = "phase"
+        const val EVENT_READY = "ready"
+        const val EVENT_STATE = "state"
+        const val EVENT_PASSWORD = "password"
+        const val EVENT_RSSI = "rssi"
+        const val EVENT_WRITE = "write"
+        const val EVENT_ERROR = "error"
+        const val EVENT_DISCONNECTED = "disconnected"
+        const val EVENT_STROBE = "strobe"
+        const val EVENT_CONFIG_SYNC = "config_sync"
+        const val EVENT_UPDATE = "update"
+
+        private const val CHANNEL_ID = "qstar_ble"
+        private const val NOTIFICATION_ID = 7001
+
+        fun start(context: Context, intent: Intent) {
+            ContextCompat.startForegroundService(context, intent.setClass(context, QStarBleService::class.java))
+        }
+    }
+}

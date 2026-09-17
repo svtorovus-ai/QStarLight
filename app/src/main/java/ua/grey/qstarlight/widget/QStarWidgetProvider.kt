@@ -1,0 +1,82 @@
+package ua.grey.qstarlight.widget
+
+import android.app.PendingIntent
+import android.appwidget.AppWidgetManager
+import android.appwidget.AppWidgetProvider
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.graphics.Color
+import android.widget.RemoteViews
+import ua.grey.qstarlight.R
+import ua.grey.qstarlight.ble.BlePrefs
+import ua.grey.qstarlight.control.ControlActionReceiver
+
+class QStarWidgetProvider : AppWidgetProvider() {
+    override fun onUpdate(context: Context, manager: AppWidgetManager, ids: IntArray) {
+        val prefs = BlePrefs(context).also { it.ensureDefaults() }
+        ids.forEach { id ->
+            val views = RemoteViews(context.packageName, R.layout.widget_qstar)
+            val colorName = when {
+                prefs.white <= 15 -> "Жовтий"
+                prefs.white >= 85 -> "Білий"
+                else -> "Теплий"
+            }
+            views.setTextViewText(R.id.widgetStatus, "$colorName • ${prefs.brightness}%")
+            views.setOnClickPendingIntent(R.id.widgetYellow, presetIntent(context, 0, 2))
+            views.setOnClickPendingIntent(R.id.widgetWarm, presetIntent(context, 50, 3))
+            views.setOnClickPendingIntent(R.id.widgetWhite, presetIntent(context, 100, 4))
+            views.setOnClickPendingIntent(R.id.widgetStrobe, strobeIntent(context, 5))
+
+            val idsByBrightness = intArrayOf(
+                R.id.b10, R.id.b20, R.id.b30, R.id.b40, R.id.b50,
+                R.id.b60, R.id.b70, R.id.b80, R.id.b90, R.id.b100
+            )
+            idsByBrightness.forEachIndexed { index, viewId ->
+                val value = (index + 1) * 10
+                views.setOnClickPendingIntent(viewId, brightnessIntent(context, value, 20 + index))
+                val active = value <= prefs.brightness
+                views.setTextColor(viewId, if (active) Color.rgb(255, 200, 74) else Color.rgb(65, 77, 92))
+            }
+            manager.updateAppWidget(id, views)
+        }
+    }
+
+    private fun presetIntent(context: Context, white: Int, request: Int): PendingIntent {
+        val i = Intent(context, ControlActionReceiver::class.java)
+            .setAction(ControlActionReceiver.ACTION_PRESET)
+            .putExtra(ControlActionReceiver.EXTRA_WHITE, white)
+        return pending(context, request, i)
+    }
+
+    private fun strobeIntent(context: Context, request: Int): PendingIntent {
+        val i = Intent(context, ControlActionReceiver::class.java).setAction(ControlActionReceiver.ACTION_STROBE)
+        return pending(context, request, i)
+    }
+
+    private fun brightnessIntent(context: Context, brightness: Int, request: Int): PendingIntent {
+        val i = Intent(context, ControlActionReceiver::class.java)
+            .setAction(ControlActionReceiver.ACTION_BRIGHTNESS_SET)
+            .putExtra(ControlActionReceiver.EXTRA_BRIGHTNESS, brightness)
+        return pending(context, request, i)
+    }
+
+    private fun pending(context: Context, request: Int, i: Intent): PendingIntent =
+        PendingIntent.getBroadcast(
+            context,
+            8000 + request,
+            i,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+    companion object {
+        fun refresh(context: Context) {
+            val manager = AppWidgetManager.getInstance(context)
+            val component = ComponentName(context, QStarWidgetProvider::class.java)
+            val ids = manager.getAppWidgetIds(component)
+            if (ids.isNotEmpty()) {
+                QStarWidgetProvider().onUpdate(context, manager, ids)
+            }
+        }
+    }
+}

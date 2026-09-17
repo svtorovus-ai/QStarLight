@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="bg">#080B10</color>
+    <color name="surface">#151C25</color>
+    <color name="surface_soft">#10161E</color>
+    <color name="text">#F3F6FA</color>
+    <color name="muted">#8D99A8</color>
+    <color name="accent">#FFC84A</color>
+    <color name="accent_warm">#FFD98B</color>
+    <color name="ice">#F8FBFF</color>
+    <color name="stroke">#2D3947</color>
+    <color name="log_text">#A9B7C7</color>
+</resources>
