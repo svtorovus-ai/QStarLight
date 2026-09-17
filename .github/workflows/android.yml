@@ -1,0 +1,66 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Restore stable signing key
+        if: ${{ secrets.QSTAR_KEYSTORE_B64 != '' }}
+        run: |
+          mkdir -p signing
+          printf '%s' '${{ secrets.QSTAR_KEYSTORE_B64 }}' | base64 -d > signing/qstarlight-update.jks
+
+      - name: Unit tests
+        run: gradle :app:testDebugUnitTest --stacktrace
+
+      - name: Build debug APK
+        if: ${{ secrets.QSTAR_KEYSTORE_B64 == '' }}
+        run: gradle :app:assembleDebug --stacktrace
+
+      - name: Build stable release APK
+        if: ${{ secrets.QSTAR_KEYSTORE_B64 != '' }}
+        env:
+          QSTAR_KEYSTORE_FILE: signing/qstarlight-update.jks
+          QSTAR_STORE_PASSWORD: ${{ secrets.QSTAR_STORE_PASSWORD }}
+          QSTAR_KEY_ALIAS: ${{ secrets.QSTAR_KEY_ALIAS }}
+          QSTAR_KEY_PASSWORD: ${{ secrets.QSTAR_KEY_PASSWORD }}
+        run: gradle :app:assembleRelease --stacktrace
+
+      - name: Upload debug APK
+        if: ${{ secrets.QSTAR_KEYSTORE_B64 == '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: QStarLight-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload stable release APK
+        if: ${{ secrets.QSTAR_KEYSTORE_B64 != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: QStarLight-release
+          path: app/build/outputs/apk/release/app-release.apk
