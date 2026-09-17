@@ -61,25 +61,73 @@ jobs:
 
           test "$(wc -c < /tmp/qsl-source/app/src/main/res/layout/activity_main.xml)" = "37127"
           echo "fe326cbd9a55c53e7bcf202be54887f7632cc50211d69a49aa9fcd92fc3e9167  /tmp/qsl-source/app/src/main/res/layout/activity_main.xml" | sha256sum -c -
-
           sed -i 's/Theme.AppCompat.Translucent.NoTitleBar/Theme.AppCompat.DayNight.NoActionBar/' /tmp/qsl-source/app/src/main/res/values/themes.xml
 
-          test -s /tmp/qsl-source/app/src/main/AndroidManifest.xml
-          test -s /tmp/qsl-source/app/src/main/java/ua/grey/qstarlight/MainActivity.kt
-          test -s /tmp/qsl-source/app/src/main/java/ua/grey/qstarlight/ble/QStarBleService.kt
-          test -s /tmp/qsl-source/app/src/main/java/ua/grey/qstarlight/remote/RemoteLinkService.kt
-          test -s /tmp/qsl-source/app/src/main/java/ua/grey/qstarlight/update/UpdateManager.kt
-          test -s /tmp/qsl-source/app/src/main/res/layout/widget_qstar.xml
-          test -s /tmp/qsl-source/.github/workflows/android.yml
-
           rm -rf /tmp/qsl-source/signing
-
-          rsync -a --delete \
-            --exclude='.git/' \
-            --exclude='.github/workflows/migrate-from-cashpilot.yml' \
-            /tmp/qsl-source/ ./
-
+          rsync -a --delete --exclude='.git/' --exclude='.github/workflows/migrate-from-cashpilot.yml' /tmp/qsl-source/ ./
           rm -f .github/workflows/migrate-from-cashpilot.yml
+
+          cat > app/build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+          }
+
+          val qstarKeystorePath = System.getenv("QSTAR_KEYSTORE_FILE")
+          val qstarStorePassword = System.getenv("QSTAR_STORE_PASSWORD")
+          val qstarKeyAlias = System.getenv("QSTAR_KEY_ALIAS")
+          val qstarKeyPassword = System.getenv("QSTAR_KEY_PASSWORD")
+          val hasStableSigning = listOf(qstarKeystorePath, qstarStorePassword, qstarKeyAlias, qstarKeyPassword).all { !it.isNullOrBlank() }
+
+          android {
+              namespace = "ua.grey.qstarlight"
+              compileSdk = 35
+              defaultConfig {
+                  applicationId = "ua.grey.qstarlight"
+                  minSdk = 26
+                  targetSdk = 35
+                  versionCode = 3
+                  versionName = "0.3.0"
+                  testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+              }
+              if (hasStableSigning) {
+                  signingConfigs {
+                      create("qstarStable") {
+                          storeFile = rootProject.file(qstarKeystorePath!!)
+                          storePassword = qstarStorePassword
+                          keyAlias = qstarKeyAlias
+                          keyPassword = qstarKeyPassword
+                      }
+                  }
+              }
+              buildTypes {
+                  getByName("debug")
+                  release {
+                      isMinifyEnabled = false
+                      if (hasStableSigning) signingConfig = signingConfigs.getByName("qstarStable")
+                      proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+                  }
+              }
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+              kotlinOptions { jvmTarget = "17" }
+          }
+
+          dependencies {
+              implementation("androidx.core:core-ktx:1.15.0")
+              implementation("androidx.appcompat:appcompat:1.7.0")
+              testImplementation("junit:junit:4.13.2")
+          }
+          EOF
+
+          test -s app/src/main/AndroidManifest.xml
+          test -s app/src/main/java/ua/grey/qstarlight/MainActivity.kt
+          test -s app/src/main/java/ua/grey/qstarlight/ble/QStarBleService.kt
+          test -s app/src/main/java/ua/grey/qstarlight/remote/RemoteLinkService.kt
+          test -s app/src/main/java/ua/grey/qstarlight/update/UpdateManager.kt
+          test -s app/src/main/res/layout/widget_qstar.xml
 
       - name: Set up JDK 17
         uses: actions/setup-java@v5
