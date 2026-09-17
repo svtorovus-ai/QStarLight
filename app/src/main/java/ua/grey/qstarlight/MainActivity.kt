@@ -124,7 +124,8 @@ class MainActivity : AppCompatActivity() {
         "Подвійний",
         "Потрійний",
         "Ліво ↔ право",
-        "Подвійний ліво ↔ право"
+        "Подвійний ліво ↔ право",
+        "Жовтий ↔ білий • швидкий"
     )
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -228,9 +229,9 @@ class MainActivity : AppCompatActivity() {
         seekStrobeWhite.max = 100
         seekStrobeBrightness.min = 5
         seekStrobeBrightness.max = 100
-        seekStrobeOn.min = 60
+        seekStrobeOn.min = 40
         seekStrobeOn.max = 1000
-        seekStrobeOff.min = 60
+        seekStrobeOff.min = 40
         seekStrobeOff.max = 1000
         seekStrobePause.min = 100
         seekStrobePause.max = 2000

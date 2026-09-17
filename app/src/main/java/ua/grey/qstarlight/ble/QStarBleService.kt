@@ -593,7 +593,11 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         if (prefs.role() == BlePrefs.Role.HUB) hubTransport?.publishStatus("QStar готові") else shutdownSoon()
     }
 
-    private data class StrobeStep(val states: List<Boolean>, val delayMs: Int)
+    private data class StrobeStep(
+        val states: List<Boolean>,
+        val delayMs: Int,
+        val whites: List<Int?>? = null
+    )
 
     private fun startStrobe() {
         oneShot = false
@@ -601,12 +605,22 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         strobeActive = true
         strobeGeneration++
         val generation = strobeGeneration
-        prefs.power = true
         ensureConnections {
-            sendFrameAll(QStarProtocol.cctFrame(prefs.strobeWhite, prefs.strobeBrightness)) {
-                if (strobeActive && generation == strobeGeneration) {
-                    event(EVENT_STROBE, message = "strobe_on:${prefs.strobeMode.name}")
-                    runStrobeSequence(generation, 0)
+            if (prefs.strobeMode == BlePrefs.StrobeMode.YELLOW_WHITE_SWAP) {
+                // Start from a known dark state. The selected normal color/power remain untouched
+                // in prefs so STOP can restore exactly what the user had before the strobe.
+                sendFrameAll(QStarProtocol.POWER_OFF) {
+                    if (strobeActive && generation == strobeGeneration) {
+                        event(EVENT_STROBE, message = "strobe_on:${prefs.strobeMode.name}")
+                        runStrobeSequence(generation, 0)
+                    }
+                }
+            } else {
+                sendFrameAll(QStarProtocol.cctFrame(prefs.strobeWhite, prefs.strobeBrightness)) {
+                    if (strobeActive && generation == strobeGeneration) {
+                        event(EVENT_STROBE, message = "strobe_on:${prefs.strobeMode.name}")
+                        runStrobeSequence(generation, 0)
+                    }
                 }
             }
         }
@@ -664,7 +678,57 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
                     StrobeStep(listOf(false, true), on), StrobeStep(allOff, pause)
                 )
             }
+            BlePrefs.StrobeMode.YELLOW_WHITE_SWAP -> {
+                if (count < 2) {
+                    listOf(StrobeStep(allOn, on), StrobeStep(allOff, off))
+                } else {
+                    // Requested pattern:
+                    // L yellow -> dark -> R white -> dark -> L white -> dark -> R yellow -> dark.
+                    // It intentionally ignores the long series pause and caps timings for a rapid effect.
+                    val fastOn = on.coerceIn(40, 80)
+                    val fastOff = off.coerceIn(40, 60)
+                    listOf(
+                        StrobeStep(listOf(true, false), fastOn, listOf(0, null)),
+                        StrobeStep(allOff, fastOff),
+                        StrobeStep(listOf(false, true), fastOn, listOf(null, 100)),
+                        StrobeStep(allOff, fastOff),
+                        StrobeStep(listOf(true, false), fastOn, listOf(100, null)),
+                        StrobeStep(allOff, fastOff),
+                        StrobeStep(listOf(false, true), fastOn, listOf(null, 0)),
+                        StrobeStep(allOff, fastOff)
+                    )
+                }
+            }
         }
+    }
+
+    private fun applyStrobeStep(step: StrobeStep, done: () -> Unit) {
+        val refs = prefs.devices()
+        fun sendAt(index: Int) {
+            if (index >= refs.size) { done(); return }
+            val connection = connections[refs[index].mac]
+            if (connection == null || !connection.isReady()) {
+                sendAt(index + 1)
+                return
+            }
+            val desiredOn = step.states.getOrElse(index) { false }
+            val desiredWhite = step.whites?.getOrNull(index)
+
+            fun writePower() {
+                connection.writeControl(if (desiredOn) QStarProtocol.POWER_ON else QStarProtocol.POWER_OFF) {
+                    handler.postDelayed({ sendAt(index + 1) }, 8)
+                }
+            }
+
+            if (desiredWhite != null) {
+                connection.writeControl(QStarProtocol.cctFrame(desiredWhite, prefs.strobeBrightness)) {
+                    writePower()
+                }
+            } else {
+                writePower()
+            }
+        }
+        sendAt(0)
     }
 
     private fun runStrobeSequence(generation: Long, index: Int) {
@@ -673,8 +737,8 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         if (seq.isEmpty()) return
         val stepIndex = index % seq.size
         val step = seq[stepIndex]
-        applyPowerStates(step.states) {
-            if (!strobeActive || generation != strobeGeneration) return@applyPowerStates
+        applyStrobeStep(step) {
+            if (!strobeActive || generation != strobeGeneration) return@applyStrobeStep
             handler.postDelayed({ runStrobeSequence(generation, (stepIndex + 1) % seq.size) }, step.delayMs.toLong())
         }
     }

@@ -14,7 +14,7 @@ class BlePrefs(private val context: Context) {
 
     enum class Role { HUB, PHONE }
     enum class StartupMode { RESTORE, START_ONLY, FADE_TO_TARGET, OFF }
-    enum class StrobeMode { CLASSIC, DOUBLE, TRIPLE, ALTERNATE, DOUBLE_ALTERNATE }
+    enum class StrobeMode { CLASSIC, DOUBLE, TRIPLE, ALTERNATE, DOUBLE_ALTERNATE, YELLOW_WHITE_SWAP }
 
     fun ensureDefaults() {
         if (!prefs.contains(KEY_MAC_1)) {
@@ -200,11 +200,11 @@ class BlePrefs(private val context: Context) {
 
     var strobeOnMs: Int
         get() = prefs.getInt(KEY_STROBE_ON, 120)
-        set(value) = putSyncInt(KEY_STROBE_ON, value.coerceIn(60, 1000))
+        set(value) = putSyncInt(KEY_STROBE_ON, value.coerceIn(40, 1000))
 
     var strobeOffMs: Int
         get() = prefs.getInt(KEY_STROBE_OFF, 110)
-        set(value) = putSyncInt(KEY_STROBE_OFF, value.coerceIn(60, 1000))
+        set(value) = putSyncInt(KEY_STROBE_OFF, value.coerceIn(40, 1000))
 
     var strobePauseMs: Int
         get() = prefs.getInt(KEY_STROBE_PAUSE, 420)
@@ -268,8 +268,8 @@ class BlePrefs(private val context: Context) {
             .putString(KEY_STROBE_MODE, json.optString("strobeMode", strobeMode.name))
             .putInt(KEY_STROBE_WHITE, json.optInt("strobeWhite", strobeWhite).coerceIn(0, 100))
             .putInt(KEY_STROBE_BRIGHTNESS, json.optInt("strobeBrightness", strobeBrightness).coerceIn(5, 100))
-            .putInt(KEY_STROBE_ON, json.optInt("strobeOnMs", strobeOnMs).coerceIn(60, 1000))
-            .putInt(KEY_STROBE_OFF, json.optInt("strobeOffMs", strobeOffMs).coerceIn(60, 1000))
+            .putInt(KEY_STROBE_ON, json.optInt("strobeOnMs", strobeOnMs).coerceIn(40, 1000))
+            .putInt(KEY_STROBE_OFF, json.optInt("strobeOffMs", strobeOffMs).coerceIn(40, 1000))
             .putInt(KEY_STROBE_PAUSE, json.optInt("strobePauseMs", strobePauseMs).coerceIn(100, 2000))
             .putLong(KEY_CONFIG_REVISION, incomingRevision)
 
