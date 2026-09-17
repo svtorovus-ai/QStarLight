@@ -49,6 +49,7 @@ class LampConnection(
     private var notifyChar: BluetoothGattCharacteristic? = null
     private val ops = ArrayDeque<Op>()
     private var activeOp: Op? = null
+    private var activeOpTimeout: Runnable? = null
     private var handshakeAttempts = 0
     private var handshakeVerified = false
     private var handshake = QStarProtocol.newHandshake()
@@ -138,13 +139,9 @@ class LampConnection(
             fail("CCCD missing")
             return
         }
-        enqueue(Op.DescriptorWrite(cccd, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE) { ok ->
-            if (ok) {
-                setPhase(Phase.HANDSHAKE)
-                sendHandshake()
-            } else {
-                fail("CCCD write failed")
-            }
+        enqueue(Op.DescriptorWrite(cccd, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE) { _ ->
+            setPhase(Phase.HANDSHAKE)
+            sendHandshake()
         })
     }
 
@@ -196,7 +193,7 @@ class LampConnection(
                         if (!ok) fail("Password write failed")
                         else handler.postDelayed({ if (!isReady()) markReady() }, 700)
                     })
-                }, 120)
+                }, 500)
             } else {
                 markReady()
             }
@@ -235,10 +232,24 @@ class LampConnection(
             }
             is Op.DescriptorWrite -> writeDescriptor(g, op.descriptor, op.data)
         }
-        if (!started) finishActive(false)
+        if (!started) {
+            finishActive(false)
+        } else {
+            val timeout = Runnable {
+                if (activeOp === op && !closed) {
+                    finishActive(false)
+                    fail("GATT operation timeout")
+                    disconnect()
+                }
+            }
+            activeOpTimeout = timeout
+            handler.postDelayed(timeout, 2500)
+        }
     }
 
     private fun finishActive(ok: Boolean) {
+        activeOpTimeout?.let(handler::removeCallbacks)
+        activeOpTimeout = null
         val op = activeOp
         activeOp = null
         when (op) {

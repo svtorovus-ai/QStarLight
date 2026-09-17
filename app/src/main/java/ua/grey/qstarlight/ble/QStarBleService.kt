@@ -18,6 +18,8 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.SystemClock
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import org.json.JSONObject
@@ -42,6 +44,10 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
     private var interactive = false
     private var oneShot = false
     private var scanActive = false
+    private var reconnectScheduled = false
+    private var reconnectRounds = 0
+    private val readyMacs = linkedSetOf<String>()
+    private var safetyFallbackActive = false
     private var bootPending = false
     private var latestCct: Pair<Int, Int>? = null
     private var sendingCct = false
@@ -156,7 +162,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
                 startScan(4_000) { if (!remoteTakeover) ensureConnections() }
             }
         }
-        return START_NOT_STICKY
+        return if (interactive && !oneShot) START_STICKY else START_NOT_STICKY
     }
 
     private fun ensureHubTransport() {
@@ -169,6 +175,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
     private fun disconnectAll() {
         connections.values.forEach { it.disconnect() }
         connections.clear()
+        readyMacs.clear()
         connectPlan.clear()
         connectingMac = null
     }
@@ -230,50 +237,47 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         }
     }
 
+    private var pendingAfterReady: (() -> Unit)? = null
+
+    private fun allSelectedReady(): Boolean {
+        val refs = prefs.devices()
+        return refs.isNotEmpty() && refs.all { connections[it.mac]?.isReady() == true }
+    }
+
     private fun ensureConnections(afterReady: (() -> Unit)? = null) {
-        if (remoteTakeover) {
-            afterReady?.invoke()
-            return
-        }
+        if (remoteTakeover) return
+        if (afterReady != null) pendingAfterReady = afterReady
         if (!hasConnectPermission() || !adapter.isEnabled) {
             event(EVENT_ERROR, message = "Bluetooth permission or adapter missing")
-            if (oneShot) shutdownSoon()
+            scheduleReconnect(2000)
             return
         }
         val refs = prefs.devices()
         if (refs.isEmpty()) {
             event(EVENT_ERROR, message = "No QStar devices selected")
-            if (oneShot) shutdownSoon()
             return
         }
-
-        connectPlan.clear()
-        refs.forEach { ref ->
-            val existing = connections[ref.mac]
-            if (existing == null || !existing.isReady()) connectPlan.add(ref)
-        }
-
-        if (connectPlan.isEmpty()) {
-            afterReady?.invoke()
+        if (allSelectedReady()) {
             onAllReady()
-        } else {
-            pendingAfterReady = afterReady
-            pumpConnectPlan()
+            return
         }
+        refs.forEach { ref ->
+            if (connections[ref.mac]?.isReady() != true && connectingMac != ref.mac && connectPlan.none { it.mac == ref.mac }) connectPlan.add(ref)
+        }
+        pumpConnectPlan()
+        scheduleReconnect()
     }
 
-    private var pendingAfterReady: (() -> Unit)? = null
-
     private fun pumpConnectPlan() {
-        if (connectingMac != null) return
+        if (remoteTakeover || connectingMac != null) return
         while (connectPlan.isNotEmpty()) {
             val ref = connectPlan.removeFirst()
             if (connections[ref.mac]?.isReady() == true) continue
-            val device = try { adapter.getRemoteDevice(ref.mac) }
-            catch (_: Throwable) { continue }
+            val device = try { adapter.getRemoteDevice(ref.mac) } catch (_: Throwable) { continue }
             val connection = LampConnection(this, device, prefs::password, this)
             connections[ref.mac]?.disconnect()
             connections[ref.mac] = connection
+            readyMacs.remove(ref.mac)
             connectingMac = ref.mac
             connection.connect()
             handler.postDelayed({
@@ -281,29 +285,102 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
                     event(EVENT_ERROR, ref.mac, ref.name, "Connect timeout")
                     connection.disconnect()
                     connectingMac = null
-                    handler.postDelayed({ pumpConnectPlan() }, 300)
+                    scheduleReconnect(350)
                 }
-            }, 7_000)
+            }, 12000)
             return
         }
-        val callback = pendingAfterReady
-        pendingAfterReady = null
-        callback?.invoke()
-        onAllReady()
+        if (allSelectedReady()) onAllReady() else scheduleReconnect()
+    }
+
+    private fun scheduleReconnect(delayMs: Long = 1200L) {
+        if (reconnectScheduled || remoteTakeover) return
+        val needed = interactive || bootPending || oneShot || latestCct != null || pendingAfterReady != null
+        if (!needed) return
+        reconnectScheduled = true
+        handler.postDelayed({
+            reconnectScheduled = false
+            if (remoteTakeover) return@postDelayed
+            if (allSelectedReady()) {
+                onAllReady()
+                return@postDelayed
+            }
+            reconnectRounds++
+            prefs.devices().forEach { ref ->
+                if (connections[ref.mac]?.isReady() != true && connectingMac != ref.mac && connectPlan.none { it.mac == ref.mac }) connectPlan.add(ref)
+            }
+            pumpConnectPlan()
+            if (!allSelectedReady()) scheduleReconnect()
+        }, delayMs)
     }
 
     private fun onAllReady() {
+        if (!allSelectedReady()) {
+            scheduleReconnect()
+            return
+        }
+        reconnectRounds = 0
         if (bootPending) {
             bootPending = false
             runBootRoutine()
             return
         }
+        if (safetyFallbackActive) {
+            sendFrameAll(QStarProtocol.POWER_ON) {
+                sendFrameAll(QStarProtocol.cctFrame(100, 100)) {
+                    safetyFallbackActive = false
+                    handler.postDelayed({ restoreDesiredAfterSafety() }, 100)
+                }
+            }
+            return
+        }
+        finishReadyCycle()
+    }
+
+    private fun finishReadyCycle() {
+        val callback = pendingAfterReady
+        pendingAfterReady = null
+        callback?.invoke()
         pumpLatestCct()
         if (interactive && !rssiLoop) startRssiLoop()
     }
 
+    private fun restoreDesiredAfterSafety() {
+        if (!allSelectedReady()) {
+            safetyFallbackActive = true
+            scheduleReconnect(250)
+            return
+        }
+        if (prefs.power) {
+            sendFrameAll(QStarProtocol.POWER_ON) {
+                sendFrameAll(QStarProtocol.cctFrame(prefs.white, prefs.brightness)) { finishReadyCycle() }
+            }
+        } else {
+            sendFrameAll(QStarProtocol.POWER_OFF) { finishReadyCycle() }
+        }
+    }
+
+    private fun activateSafetyFallback(reason: String) {
+        if (remoteTakeover) return
+        stopStrobeInternal(restore = false)
+        safetyFallbackActive = true
+        latestCct = null
+        event(EVENT_PHASE, message = "failsafe_white_100:$reason")
+        sendFrameReady(QStarProtocol.POWER_ON) {
+            sendFrameReady(QStarProtocol.cctFrame(100, 100)) { }
+        }
+        scheduleReconnect(250)
+    }
+
+    private fun sendSafetyTo(connection: LampConnection, done: () -> Unit) {
+        connection.writeControl(QStarProtocol.POWER_ON) {
+            connection.writeControl(QStarProtocol.cctFrame(100, 100)) { done() }
+        }
+    }
+
     private fun pumpLatestCct() {
         if (sendingCct || strobeActive) return
+        if (!allSelectedReady()) { scheduleReconnect(); return }
         val desired = latestCct ?: return
         latestCct = null
         sendingCct = true
@@ -325,22 +402,31 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
     }
 
     private fun sendFrameAll(frame: ByteArray, done: () -> Unit) {
-        val list = prefs.devices().mapNotNull { connections[it.mac] }.filter { it.isReady() }
-        if (list.isEmpty()) {
-            event(EVENT_ERROR, message = "No ready QStar connection")
+        val refs = prefs.devices()
+        if (refs.isEmpty() || refs.any { connections[it.mac]?.isReady() != true }) {
+            event(EVENT_ERROR, message = "Waiting for both QStar lamps")
+            scheduleReconnect()
             done()
             return
         }
+        val list = refs.map { connections[it.mac]!! }
         fun sendAt(index: Int) {
-            if (index >= list.size) {
-                done()
-                return
-            }
+            if (index >= list.size) { done(); return }
             val c = list[index]
             c.writeControl(frame) { ok ->
                 event(if (ok) EVENT_WRITE else EVENT_ERROR, c.mac, c.name, QStarProtocol.hex(frame))
-                handler.postDelayed({ sendAt(index + 1) }, 35)
+                handler.postDelayed({ sendAt(index + 1) }, 45)
             }
+        }
+        sendAt(0)
+    }
+
+    private fun sendFrameReady(frame: ByteArray, done: () -> Unit) {
+        val list = prefs.devices().mapNotNull { connections[it.mac] }.filter { it.isReady() }
+        fun sendAt(index: Int) {
+            if (index >= list.size) { done(); return }
+            val c = list[index]
+            c.writeControl(frame) { handler.postDelayed({ sendAt(index + 1) }, 35) }
         }
         sendAt(0)
     }
@@ -542,8 +628,14 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
 
     override fun onReady(mac: String) {
         event(EVENT_READY, mac, connections[mac]?.name, "ready")
+        readyMacs.add(mac)
         if (connectingMac == mac) connectingMac = null
-        handler.postDelayed({ pumpConnectPlan() }, 550)
+        val connection = connections[mac]
+        if (safetyFallbackActive && connection != null) {
+            sendSafetyTo(connection) { handler.postDelayed({ pumpConnectPlan() }, 180) }
+        } else {
+            handler.postDelayed({ pumpConnectPlan() }, 300)
+        }
     }
 
     override fun onState(mac: String, state: QStarProtocol.LampState) {
@@ -565,23 +657,18 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
 
     override fun onError(mac: String, message: String) {
         event(EVENT_ERROR, mac, connections[mac]?.name, message)
-        if (connectingMac == mac) {
-            connectingMac = null
-            handler.postDelayed({ pumpConnectPlan() }, 300)
-        }
+        val wasReady = readyMacs.remove(mac)
+        if (connectingMac == mac) connectingMac = null
+        if (wasReady && !remoteTakeover) activateSafetyFallback("error:$message")
+        if (!remoteTakeover) scheduleReconnect(350)
     }
 
     override fun onDisconnected(mac: String, status: Int) {
         event(EVENT_DISCONNECTED, mac, connections[mac]?.name, "status=$status")
-        if (interactive && !remoteTakeover) {
-            val ref = prefs.devices().firstOrNull { it.mac == mac } ?: return
-            handler.postDelayed({
-                if (connections[mac]?.isReady() != true && !connectPlan.any { it.mac == mac }) {
-                    connectPlan.add(ref)
-                    pumpConnectPlan()
-                }
-            }, 1_500)
-        }
+        val wasReady = readyMacs.remove(mac)
+        if (connectingMac == mac) connectingMac = null
+        if (wasReady && !remoteTakeover) activateSafetyFallback("disconnect:$status")
+        if (!remoteTakeover) scheduleReconnect(300)
     }
 
     private fun event(type: String, mac: String? = null, name: String? = null, message: String? = null, rssi: Int? = null) {
@@ -690,8 +777,15 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
     }
 
     override fun onRemoteConfig(config: JSONObject): Boolean {
-        val changed = prefs.applySyncConfig(config)
-        if (changed) handler.post { event(EVENT_CONFIG_SYNC, message = "config_from_phone") }
+        val changed = prefs.applySyncConfig(config, force = true)
+        if (changed) handler.post {
+            latestCct = prefs.white to prefs.brightness
+            event(EVENT_CONFIG_SYNC, message = "config_from_phone")
+            ensureConnections {
+                if (prefs.power) sendFrameAll(QStarProtocol.POWER_ON) { pumpLatestCct() }
+                else sendFrameAll(QStarProtocol.POWER_OFF) { }
+            }
+        }
         return changed
     }
 
@@ -752,7 +846,11 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         private const val NOTIFICATION_ID = 7001
 
         fun start(context: Context, intent: Intent) {
-            ContextCompat.startForegroundService(context, intent.setClass(context, QStarBleService::class.java))
+            try {
+                ContextCompat.startForegroundService(context, intent.setClass(context, QStarBleService::class.java))
+            } catch (t: Throwable) {
+                Log.e("QStarBle", "Unable to start BLE service", t)
+            }
         }
     }
 }

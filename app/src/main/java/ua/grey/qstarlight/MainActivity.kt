@@ -14,11 +14,13 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import android.view.View
+import android.view.MotionEvent
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
 import android.widget.SeekBar
+import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.Switch
 import android.widget.TextView
@@ -43,8 +45,8 @@ class MainActivity : AppCompatActivity() {
     private var updatingUi = false
     private var strobeOnUi = false
 
-    private lateinit var controlPage: View
-    private lateinit var settingsPage: View
+    private lateinit var controlPage: ScrollView
+    private lateinit var settingsPage: ScrollView
     private lateinit var tabControl: Button
     private lateinit var tabSettings: Button
 
@@ -243,6 +245,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun refreshAllControlsFromPrefs() {
         val old = updatingUi
+        val controlScrollY = controlPage.scrollY
+        val settingsScrollY = settingsPage.scrollY
         updatingUi = true
 
         seekTemp.progress = prefs.white
@@ -257,8 +261,8 @@ class MainActivity : AppCompatActivity() {
         switchAutoPushUpdates.isChecked = prefs.autoPushUpdates
         switchSilentRootInstall.isChecked = prefs.silentRootInstall
 
-        editRemotePin.setText(prefs.remotePin)
-        editHubIp.setText(prefs.manualHubHost)
+        if (!editRemotePin.hasFocus() && editRemotePin.text.toString() != prefs.remotePin) editRemotePin.setText(prefs.remotePin)
+        if (!editHubIp.hasFocus() && editHubIp.text.toString() != prefs.manualHubHost) editHubIp.setText(prefs.manualHubHost)
 
         spinnerStartupMode.setSelection(prefs.startupMode.ordinal, false)
         seekStartWhite.progress = prefs.startWhite
@@ -278,6 +282,7 @@ class MainActivity : AppCompatActivity() {
         updateSettingsLabels()
         updateSyncStatus("Синхронізовано")
         updatingUi = old
+        handler.post { controlPage.scrollTo(0, controlScrollY); settingsPage.scrollTo(0, settingsScrollY) }
     }
 
     private fun bindActions() {
@@ -327,6 +332,7 @@ class MainActivity : AppCompatActivity() {
         }
         seekTemp.setOnSeekBarChangeListener(mainSeekListener)
         seekBrightness.setOnSeekBarChangeListener(mainSeekListener)
+        listOf(seekTemp, seekBrightness).forEach(::lockScrollWhileSeeking)
 
         btnRouteHub.setOnClickListener {
             prefs.forceDirect = false
@@ -425,6 +431,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun bindSyncSeek(seek: SeekBar, setter: (Int) -> Unit) {
+        lockScrollWhileSeeking(seek)
         seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 if (!fromUser || updatingUi) return
@@ -439,6 +446,16 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
+    private fun lockScrollWhileSeeking(seek: SeekBar) {
+        seek.setOnTouchListener { view, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> view.parent?.requestDisallowInterceptTouchEvent(true)
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> view.parent?.requestDisallowInterceptTouchEvent(false)
+            }
+            false
+        }
+    }
+
     override fun onStart() {
         super.onStart()
         ContextCompat.registerReceiver(
@@ -447,7 +464,8 @@ class MainActivity : AppCompatActivity() {
         ContextCompat.registerReceiver(
             this, remoteReceiver, IntentFilter(RemoteLinkService.ACTION_EVENT), ContextCompat.RECEIVER_NOT_EXPORTED
         )
-        if (ensurePermissions(false) || prefs.role() == BlePrefs.Role.PHONE) ControlDispatcher.connect(this)
+        runCatching { if (ensurePermissions(false) || prefs.role() == BlePrefs.Role.PHONE) ControlDispatcher.connect(this) }
+            .onFailure { appendLog("START ERROR ${it.javaClass.simpleName}: ${it.message.orEmpty()}") }
     }
 
     override fun onStop() {

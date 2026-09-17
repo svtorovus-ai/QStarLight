@@ -9,14 +9,14 @@ import org.junit.Test
 class QStarProtocolTest {
     @Test fun whiteFrame() {
         assertArrayEquals(
-            byteArrayOf(0x56, 0x64, 0x00, 0x64, 0x00, 0x00, 0xAA.toByte()),
+            byteArrayOf(0x56, 0x00, 0x64, 0x64, 0x00, 0x00, 0xAA.toByte()),
             QStarProtocol.cctFrame(100, 100)
         )
     }
 
     @Test fun yellowFrame() {
         assertArrayEquals(
-            byteArrayOf(0x56, 0x00, 0x64, 0x64, 0x00, 0x00, 0xAA.toByte()),
+            byteArrayOf(0x56, 0x64, 0x00, 0x64, 0x00, 0x00, 0xAA.toByte()),
             QStarProtocol.cctFrame(0, 100)
         )
     }

@@ -10,6 +10,7 @@ import android.content.Intent
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import org.json.JSONObject
@@ -48,6 +49,7 @@ class RemoteLinkService : Service() {
     private val sendLock = Any()
     @Volatile private var updateInProgress = false
     private var lastAutoPushedVersion = -1L
+    @Volatile private var pendingConfigRevision: Long? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -262,9 +264,18 @@ class RemoteLinkService : Service() {
                     hubVersionCode = json.optLong("versionCode", hubVersionCode)
                     broadcast(EVENT_HUB_STATUS, json.optString("text", "status"), host, line)
                 }
+                "config_ack" -> {
+                    val revision = json.optLong("revision", -1L)
+                    if (pendingConfigRevision == revision) {
+                        pendingConfigRevision = null
+                        broadcast(EVENT_CONFIG_SYNC, "Налаштування підтверджено магнітолою", host, line)
+                    }
+                }
                 "config_sync" -> {
                     val config = json.optJSONObject("config")
-                    if (config != null && prefs.applySyncConfig(config)) {
+                    if (pendingConfigRevision != null) {
+                        broadcast(EVENT_CONFIG_SYNC, "Очікую підтвердження налаштувань телефона", host, line)
+                    } else if (config != null && prefs.applySyncConfig(config)) {
                         broadcast(EVENT_CONFIG_SYNC, "Налаштування отримано з магнітоли", host, line)
                     } else {
                         broadcast(EVENT_CONFIG_SYNC, "Налаштування синхронні", host, line)
@@ -345,7 +356,12 @@ class RemoteLinkService : Service() {
 
     private fun sendConfigNow() {
         if (connected && writer != null) {
-            sendLine(JSONObject().put("type", "config_sync").put("config", prefs.syncConfigJson()))
+            val config = prefs.syncConfigJson()
+            val revision = config.optLong("revision", prefs.configRevision)
+            pendingConfigRevision = revision
+            if (!sendLine(JSONObject().put("type", "config_sync").put("config", config))) {
+                pendingConfigRevision = null
+            }
         }
     }
 
@@ -564,8 +580,16 @@ class RemoteLinkService : Service() {
         private const val CHANNEL_ID = "qstar_remote"
         private const val NOTIFICATION_ID = 7002
 
+        private fun launch(context: Context, intent: Intent) {
+            try {
+                ContextCompat.startForegroundService(context, intent)
+            } catch (t: Throwable) {
+                Log.e("QStarRemote", "Unable to start remote service", t)
+            }
+        }
+
         fun start(context: Context) {
-            ContextCompat.startForegroundService(context, Intent(context, RemoteLinkService::class.java).setAction(ACTION_START))
+            launch(context, Intent(context, RemoteLinkService::class.java).setAction(ACTION_START))
         }
 
         fun stop(context: Context) {
@@ -574,15 +598,15 @@ class RemoteLinkService : Service() {
         }
 
         fun routeChanged(context: Context) {
-            ContextCompat.startForegroundService(context, Intent(context, RemoteLinkService::class.java).setAction(ACTION_ROUTE_CHANGED))
+            launch(context, Intent(context, RemoteLinkService::class.java).setAction(ACTION_ROUTE_CHANGED))
         }
 
         fun pushConfig(context: Context) {
-            ContextCompat.startForegroundService(context, Intent(context, RemoteLinkService::class.java).setAction(ACTION_PUSH_CONFIG))
+            launch(context, Intent(context, RemoteLinkService::class.java).setAction(ACTION_PUSH_CONFIG))
         }
 
         fun pushUpdate(context: Context) {
-            ContextCompat.startForegroundService(context, Intent(context, RemoteLinkService::class.java).setAction(ACTION_PUSH_UPDATE))
+            launch(context, Intent(context, RemoteLinkService::class.java).setAction(ACTION_PUSH_UPDATE))
         }
 
         fun sendCommand(
@@ -601,7 +625,7 @@ class RemoteLinkService : Service() {
             power?.let { i.putExtra(EXTRA_POWER, it) }
             delta?.let { i.putExtra(EXTRA_DELTA, it) }
             strobe?.let { i.putExtra(EXTRA_STROBE, it) }
-            ContextCompat.startForegroundService(context, i)
+            launch(context, i)
         }
     }
 }

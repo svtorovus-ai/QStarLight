@@ -45,7 +45,7 @@ object QStarProtocol {
         val w = white.coerceIn(0, 100)
         val y = 100 - w
         val b = brightness.coerceIn(5, 100)
-        return bytes(0x56, w, y, b, mode.coerceIn(0, 255), 0x00, 0xAA)
+        return bytes(0x56, y, w, b, mode.coerceIn(0, 255), 0x00, 0xAA)
     }
 
     fun passwordFrame(password: String): ByteArray {

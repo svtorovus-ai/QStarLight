@@ -111,9 +111,7 @@ class BlePrefs(private val context: Context) {
     }
 
     private fun inferRole(): Role {
-        val dm: DisplayMetrics = context.resources.displayMetrics
-        val smallestDp = minOf(dm.widthPixels / dm.density, dm.heightPixels / dm.density)
-        return if (Build.VERSION.SDK_INT <= 29 && smallestDp >= 540f) Role.HUB else Role.PHONE
+        return if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.R) Role.HUB else Role.PHONE
     }
 
     val hubPin: String
@@ -233,6 +231,9 @@ class BlePrefs(private val context: Context) {
         }
         return JSONObject()
             .put("revision", configRevision)
+            .put("power", power)
+            .put("white", white)
+            .put("brightness", brightness)
             .put("startupMode", startupMode.name)
             .put("startWhite", startWhite)
             .put("targetWhite", targetWhite)
@@ -249,11 +250,15 @@ class BlePrefs(private val context: Context) {
     }
 
     /** Applies only if the incoming synchronized configuration is newer. */
-    fun applySyncConfig(json: JSONObject): Boolean {
+    fun applySyncConfig(json: JSONObject, force: Boolean = false): Boolean {
         val incomingRevision = json.optLong("revision", 0L)
-        if (incomingRevision <= configRevision) return false
+        if (incomingRevision <= 0L) return false
+        if (!force && incomingRevision <= configRevision) return false
 
         val e = prefs.edit()
+            .putBoolean("power", json.optBoolean("power", power))
+            .putInt("white", json.optInt("white", white).coerceIn(0, 100))
+            .putInt("brightness", json.optInt("brightness", brightness).coerceIn(5, 100))
             .putString(KEY_STARTUP_MODE, json.optString("startupMode", startupMode.name))
             .putInt(KEY_START_WHITE, json.optInt("startWhite", startWhite).coerceIn(0, 100))
             .putInt(KEY_TARGET_WHITE, json.optInt("targetWhite", targetWhite).coerceIn(0, 100))
