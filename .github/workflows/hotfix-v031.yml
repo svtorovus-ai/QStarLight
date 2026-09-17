@@ -1,0 +1,951 @@
+name: QStarLight v0.3.1 stability hotfix
+
+on:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: write
+
+jobs:
+  hotfix:
+    runs-on: ubuntu-latest
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Check hotfix marker
+        id: marker
+        shell: bash
+        run: |
+          if [ -f .hotfix-v031-applied ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Apply v0.3.1 fixes
+        if: steps.marker.outputs.skip == 'false'
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def read(path):
+              return Path(path).read_text()
+
+          def write(path, text):
+              Path(path).write_text(text)
+
+          def rep(path, old, new, count=1):
+              text = read(path)
+              actual = text.count(old)
+              if actual < count:
+                  raise SystemExit(f"{path}: expected at least {count} occurrence(s), found {actual}: {old[:120]!r}")
+              text = text.replace(old, new, count)
+              write(path, text)
+
+          def between(path, start, end, replacement):
+              text = read(path)
+              a = text.find(start)
+              if a < 0:
+                  raise SystemExit(f"{path}: start marker not found: {start}")
+              b = text.find(end, a)
+              if b < 0:
+                  raise SystemExit(f"{path}: end marker not found: {end}")
+              write(path, text[:a] + replacement + text[b:])
+
+          # Version bump.
+          rep('app/build.gradle.kts', 'versionCode = 3', 'versionCode = 4')
+          rep('app/build.gradle.kts', 'versionName = "0.3.0"', 'versionName = "0.3.1"')
+
+          # Android 14+ connectedDevice foreground-service prerequisite for the phone<->hub network link.
+          rep(
+              'app/src/main/AndroidManifest.xml',
+              '    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />\n',
+              '    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />\n'
+              '    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />\n'
+              '    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />\n'
+          )
+
+          # Field test proved the two CCT payload bytes are physically reversed versus our first interpretation.
+          rep(
+              'app/src/main/java/ua/grey/qstarlight/ble/QStarProtocol.kt',
+              '        return bytes(0x56, w, y, b, mode.coerceIn(0, 255), 0x00, 0xAA)',
+              '        // Controller command order is YELLOW, WHITE (confirmed on the actual lamps).\n'
+              '        return bytes(0x56, y, w, b, mode.coerceIn(0, 255), 0x00, 0xAA)'
+          )
+          rep(
+              'app/src/test/java/ua/grey/qstarlight/ble/QStarProtocolTest.kt',
+              '            byteArrayOf(0x56, 0x64, 0x00, 0x64, 0x00, 0x00, 0xAA.toByte()),\n            QStarProtocol.cctFrame(100, 100)',
+              '            byteArrayOf(0x56, 0x00, 0x64, 0x64, 0x00, 0x00, 0xAA.toByte()),\n            QStarProtocol.cctFrame(100, 100)'
+          )
+          rep(
+              'app/src/test/java/ua/grey/qstarlight/ble/QStarProtocolTest.kt',
+              '            byteArrayOf(0x56, 0x00, 0x64, 0x64, 0x00, 0x00, 0xAA.toByte()),\n            QStarProtocol.cctFrame(0, 100)',
+              '            byteArrayOf(0x56, 0x64, 0x00, 0x64, 0x00, 0x00, 0xAA.toByte()),\n            QStarProtocol.cctFrame(0, 100)'
+          )
+
+          # Reliable role inference for the actual pair: Android 10 head unit = HUB, modern phone = PHONE.
+          rep(
+              'app/src/main/java/ua/grey/qstarlight/ble/BlePrefs.kt',
+              '''    private fun inferRole(): Role {
+        val dm: DisplayMetrics = context.resources.displayMetrics
+        val smallestDp = minOf(dm.widthPixels / dm.density, dm.heightPixels / dm.density)
+        return if (Build.VERSION.SDK_INT <= 29 && smallestDp >= 540f) Role.HUB else Role.PHONE
+    }
+''',
+              '''    private fun inferRole(): Role {
+        // CYCLONE is Android 10. The phone is Android 12+; screen-density heuristics were
+        // unreliable on the 1024x600 head unit and could incorrectly turn it into REMOTE mode.
+        return if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.R) Role.HUB else Role.PHONE
+    }
+'''
+          )
+          rep(
+              'app/src/main/java/ua/grey/qstarlight/ble/BlePrefs.kt',
+              '            .put("revision", configRevision)\n            .put("startupMode", startupMode.name)',
+              '            .put("revision", configRevision)\n'
+              '            .put("power", power)\n'
+              '            .put("white", white)\n'
+              '            .put("brightness", brightness)\n'
+              '            .put("startupMode", startupMode.name)'
+          )
+          rep(
+              'app/src/main/java/ua/grey/qstarlight/ble/BlePrefs.kt',
+              '    fun applySyncConfig(json: JSONObject): Boolean {\n        val incomingRevision = json.optLong("revision", 0L)\n        if (incomingRevision <= configRevision) return false\n\n        val e = prefs.edit()\n            .putString(KEY_STARTUP_MODE, json.optString("startupMode", startupMode.name))',
+              '    fun applySyncConfig(json: JSONObject, force: Boolean = false): Boolean {\n'
+              '        val incomingRevision = json.optLong("revision", 0L)\n'
+              '        if (incomingRevision <= 0L) return false\n'
+              '        if (!force && incomingRevision <= configRevision) return false\n\n'
+              '        val e = prefs.edit()\n'
+              '            .putBoolean("power", json.optBoolean("power", power))\n'
+              '            .putInt("white", json.optInt("white", white).coerceIn(0, 100))\n'
+              '            .putInt("brightness", json.optInt("brightness", brightness).coerceIn(5, 100))\n'
+              '            .putString(KEY_STARTUP_MODE, json.optString("startupMode", startupMode.name))'
+          )
+
+          # Hub explicitly ACKs phone config. Phone changes are authoritative while an ACK is pending,
+          # preventing the hub's stale config from racing back and overwriting the phone.
+          rep(
+              'app/src/main/java/ua/grey/qstarlight/remote/HubTransport.kt',
+              '''                    "config_sync" -> {
+                        val config = json.optJSONObject("config")
+                        if (config != null && listener.onRemoteConfig(config)) {
+                            publishConfig()
+                            publishStatus("Налаштування синхронізовано")
+                        } else {
+                            sendConfig(client)
+                        }
+                    }
+''',
+              '''                    "config_sync" -> {
+                        val config = json.optJSONObject("config")
+                        if (config != null && listener.onRemoteConfig(config)) {
+                            writer.println(
+                                JSONObject()
+                                    .put("type", "config_ack")
+                                    .put("revision", config.optLong("revision", 0L))
+                            )
+                            publishConfig()
+                            publishStatus("Налаштування синхронізовано")
+                        } else {
+                            sendConfig(client)
+                        }
+                    }
+'''
+          )
+
+          remote = 'app/src/main/java/ua/grey/qstarlight/remote/RemoteLinkService.kt'
+          rep(remote, 'import android.os.Looper\n', 'import android.os.Looper\nimport android.util.Log\n')
+          rep(remote, '    private var lastAutoPushedVersion = -1L\n', '    private var lastAutoPushedVersion = -1L\n    @Volatile private var pendingConfigRevision: Long? = null\n')
+          rep(remote, '        hubVersionCode = -1L\n        super.onDestroy()', '        hubVersionCode = -1L\n        pendingConfigRevision = null\n        super.onDestroy()')
+          rep(
+              remote,
+              '''                "config_sync" -> {
+                    val config = json.optJSONObject("config")
+                    if (config != null && prefs.applySyncConfig(config)) {
+                        broadcast(EVENT_CONFIG_SYNC, "Налаштування отримано з магнітоли", host, line)
+                    } else {
+                        broadcast(EVENT_CONFIG_SYNC, "Налаштування синхронні", host, line)
+                    }
+                }
+''',
+              '''                "config_ack" -> {
+                    val revision = json.optLong("revision", -1L)
+                    val pending = pendingConfigRevision
+                    if (pending != null && revision == pending) {
+                        pendingConfigRevision = null
+                        broadcast(EVENT_CONFIG_SYNC, "Налаштування підтверджено магнітолою", host, line)
+                    }
+                }
+                "config_sync" -> {
+                    val config = json.optJSONObject("config")
+                    val pending = pendingConfigRevision
+                    if (pending != null) {
+                        // Initial HUB state may arrive before our phone-side config ACK. Ignore it.
+                        broadcast(EVENT_CONFIG_SYNC, "Очікую підтвердження налаштувань телефона", host, line)
+                    } else if (config != null && prefs.applySyncConfig(config)) {
+                        broadcast(EVENT_CONFIG_SYNC, "Налаштування отримано з магнітоли", host, line)
+                    } else {
+                        broadcast(EVENT_CONFIG_SYNC, "Налаштування синхронні", host, line)
+                    }
+                }
+'''
+          )
+          rep(
+              remote,
+              '''    private fun sendConfigNow() {
+        if (connected && writer != null) {
+            sendLine(JSONObject().put("type", "config_sync").put("config", prefs.syncConfigJson()))
+        }
+    }
+''',
+              '''    private fun sendConfigNow() {
+        if (connected && writer != null) {
+            val config = prefs.syncConfigJson()
+            val revision = config.optLong("revision", prefs.configRevision)
+            pendingConfigRevision = revision
+            if (!sendLine(JSONObject().put("type", "config_sync").put("config", config))) {
+                pendingConfigRevision = null
+            }
+        }
+    }
+'''
+          )
+          rep(remote, '            socket = null\n        }\n    }', '            socket = null\n            pendingConfigRevision = null\n        }\n    }', 1)
+          rep(
+              remote,
+              '''        fun start(context: Context) {
+            ContextCompat.startForegroundService(context, Intent(context, RemoteLinkService::class.java).setAction(ACTION_START))
+        }
+''',
+              '''        private fun launch(context: Context, intent: Intent) {
+            try {
+                ContextCompat.startForegroundService(context, intent)
+            } catch (t: Throwable) {
+                Log.e("QStarRemote", "Unable to start remote service", t)
+            }
+        }
+
+        fun start(context: Context) {
+            launch(context, Intent(context, RemoteLinkService::class.java).setAction(ACTION_START))
+        }
+'''
+          )
+          rep(remote, '            ContextCompat.startForegroundService(context, Intent(context, RemoteLinkService::class.java).setAction(ACTION_ROUTE_CHANGED))', '            launch(context, Intent(context, RemoteLinkService::class.java).setAction(ACTION_ROUTE_CHANGED))')
+          rep(remote, '            ContextCompat.startForegroundService(context, Intent(context, RemoteLinkService::class.java).setAction(ACTION_PUSH_CONFIG))', '            launch(context, Intent(context, RemoteLinkService::class.java).setAction(ACTION_PUSH_CONFIG))')
+          rep(remote, '            ContextCompat.startForegroundService(context, Intent(context, RemoteLinkService::class.java).setAction(ACTION_PUSH_UPDATE))', '            launch(context, Intent(context, RemoteLinkService::class.java).setAction(ACTION_PUSH_UPDATE))')
+          rep(remote, '            ContextCompat.startForegroundService(context, i)\n        }\n    }\n}', '            launch(context, i)\n        }\n    }\n}', 1)
+
+          # GATT: tolerate the controller's quirky CCCD, use stock-like password timing, and
+          # never leave the serialized operation queue wedged forever if Android drops a callback.
+          lamp = 'app/src/main/java/ua/grey/qstarlight/ble/LampConnection.kt'
+          rep(lamp, '    private var activeOp: Op? = null\n', '    private var activeOp: Op? = null\n    private var activeOpTimeout: Runnable? = null\n')
+          rep(
+              lamp,
+              '''        enqueue(Op.DescriptorWrite(cccd, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE) { ok ->
+            if (ok) {
+                setPhase(Phase.HANDSHAKE)
+                sendHandshake()
+            } else {
+                fail("CCCD write failed")
+            }
+        })
+''',
+              '''        enqueue(Op.DescriptorWrite(cccd, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE) { _ ->
+            // This firmware has a non-compliant CCCD on some units. nRF Connect can still
+            // receive notifications even when the descriptor transaction is reported oddly.
+            setPhase(Phase.HANDSHAKE)
+            sendHandshake()
+        })
+'''
+          )
+          rep(lamp, '                }, 120)\n', '                }, 500)\n')
+          rep(
+              lamp,
+              '''        if (!started) finishActive(false)
+    }
+
+    private fun finishActive(ok: Boolean) {
+        val op = activeOp
+        activeOp = null
+''',
+              '''        if (!started) {
+            finishActive(false)
+        } else {
+            val timeout = Runnable {
+                if (activeOp === op && !closed) {
+                    finishActive(false)
+                    fail("GATT operation timeout")
+                    disconnect()
+                }
+            }
+            activeOpTimeout = timeout
+            handler.postDelayed(timeout, 2500)
+        }
+    }
+
+    private fun finishActive(ok: Boolean) {
+        activeOpTimeout?.let(handler::removeCallbacks)
+        activeOpTimeout = null
+        val op = activeOp
+        activeOp = null
+'''
+          )
+          rep(
+              lamp,
+              '''            if (newState == BluetoothProfile.STATE_CONNECTED && status == BluetoothGatt.GATT_SUCCESS) {
+                setPhase(Phase.DISCOVERING)
+                if (!g.discoverServices()) fail("discoverServices failed")
+                return
+            }
+''',
+              '''            if (newState == BluetoothProfile.STATE_CONNECTED && status == BluetoothGatt.GATT_SUCCESS) {
+                try { g.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH) } catch (_: Throwable) { }
+                setPhase(Phase.DISCOVERING)
+                if (!g.discoverServices()) fail("discoverServices failed")
+                return
+            }
+'''
+          )
+
+          # Main UI: keep scroll position stable during background sync and prevent slider gestures
+          # from dragging the whole settings page. Also never let a service-start exception kill UI.
+          main = 'app/src/main/java/ua/grey/qstarlight/MainActivity.kt'
+          rep(main, 'import android.view.View\n', 'import android.view.View\nimport android.view.MotionEvent\n')
+          rep(main, 'import android.widget.SeekBar\n', 'import android.widget.SeekBar\nimport android.widget.ScrollView\n')
+          rep(main, '    private lateinit var controlPage: View\n    private lateinit var settingsPage: View\n', '    private lateinit var controlPage: ScrollView\n    private lateinit var settingsPage: ScrollView\n')
+          rep(
+              main,
+              '        val old = updatingUi\n        updatingUi = true\n\n        seekTemp.progress = prefs.white',
+              '        val old = updatingUi\n        val controlScrollY = controlPage.scrollY\n        val settingsScrollY = settingsPage.scrollY\n        updatingUi = true\n\n        seekTemp.progress = prefs.white'
+          )
+          rep(
+              main,
+              '        editRemotePin.setText(prefs.remotePin)\n        editHubIp.setText(prefs.manualHubHost)\n',
+              '        if (!editRemotePin.hasFocus() && editRemotePin.text.toString() != prefs.remotePin) editRemotePin.setText(prefs.remotePin)\n'
+              '        if (!editHubIp.hasFocus() && editHubIp.text.toString() != prefs.manualHubHost) editHubIp.setText(prefs.manualHubHost)\n'
+          )
+          rep(
+              main,
+              '        updateSyncStatus("Синхронізовано")\n        updatingUi = old\n    }',
+              '        updateSyncStatus("Синхронізовано")\n'
+              '        updatingUi = old\n'
+              '        handler.post {\n'
+              '            controlPage.scrollTo(0, controlScrollY)\n'
+              '            settingsPage.scrollTo(0, settingsScrollY)\n'
+              '        }\n'
+              '    }',
+              1
+          )
+          rep(
+              main,
+              '        seekTemp.setOnSeekBarChangeListener(mainSeekListener)\n        seekBrightness.setOnSeekBarChangeListener(mainSeekListener)\n',
+              '        seekTemp.setOnSeekBarChangeListener(mainSeekListener)\n'
+              '        seekBrightness.setOnSeekBarChangeListener(mainSeekListener)\n'
+              '        listOf(seekTemp, seekBrightness).forEach(::lockScrollWhileSeeking)\n'
+          )
+          rep(
+              main,
+              '''    private fun bindSyncSeek(seek: SeekBar, setter: (Int) -> Unit) {
+        seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+''',
+              '''    private fun bindSyncSeek(seek: SeekBar, setter: (Int) -> Unit) {
+        lockScrollWhileSeeking(seek)
+        seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+'''
+          )
+          rep(
+              main,
+              '''    override fun onStart() {
+        super.onStart()
+''',
+              '''    private fun lockScrollWhileSeeking(seek: SeekBar) {
+        seek.setOnTouchListener { view, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> view.parent?.requestDisallowInterceptTouchEvent(true)
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> view.parent?.requestDisallowInterceptTouchEvent(false)
+            }
+            false
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+'''
+          )
+          rep(
+              main,
+              '        if (ensurePermissions(false) || prefs.role() == BlePrefs.Role.PHONE) ControlDispatcher.connect(this)\n',
+              '        runCatching {\n'
+              '            if (ensurePermissions(false) || prefs.role() == BlePrefs.Role.PHONE) ControlDispatcher.connect(this)\n'
+              '        }.onFailure { appendLog("START ERROR ${it.javaClass.simpleName}: ${it.message.orEmpty()}") }\n'
+          )
+
+          # BLE service: persistent reconnection, Android-10 scan fallback, two-lamp readiness gate,
+          # and a white/100% safety state while recovering a broken pair.
+          svc = 'app/src/main/java/ua/grey/qstarlight/ble/QStarBleService.kt'
+          rep(svc, 'import android.content.pm.PackageManager\n', 'import android.content.pm.PackageManager\nimport android.location.LocationManager\n')
+          rep(svc, 'import android.os.Looper\n', 'import android.os.Looper\nimport android.os.SystemClock\nimport android.util.Log\n')
+          rep(
+              svc,
+              '    private var scanActive = false\n    private var bootPending = false\n',
+              '    private var scanActive = false\n'
+              '    private var scanDoneCallback: (() -> Unit)? = null\n'
+              '    private var reconnectScheduled = false\n'
+              '    private var reconnectRounds = 0\n'
+              '    private var lastRecoveryScanAt = 0L\n'
+              '    private val readyMacs = linkedSetOf<String>()\n'
+              '    private var safetyFallbackActive = false\n'
+              '    private var bootPending = false\n'
+          )
+          rep(
+              svc,
+              '''    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent == null) return START_NOT_STICKY
+        when (intent.action) {
+''',
+              '''    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent == null) {
+            interactive = true
+            oneShot = false
+            startForegroundSafe(if (prefs.role() == BlePrefs.Role.HUB) "Магнітола • QStar hub" else "Прямий BLE • QStar")
+            if (prefs.role() == BlePrefs.Role.HUB) ensureHubTransport()
+            if (!remoteTakeover) ensureConnections()
+            return START_STICKY
+        }
+        when (intent.action) {
+'''
+          )
+          rep(
+              svc,
+              '''            ACTION_SCAN -> {
+                startForegroundSafe("Scanning QStar")
+                startScan(8_000)
+            }
+''',
+              '''            ACTION_SCAN -> {
+                startForegroundSafe("Scanning QStar")
+                startScan(8_000) { if (!remoteTakeover) ensureConnections() }
+            }
+'''
+          )
+          rep(svc, '        return START_NOT_STICKY\n    }\n\n    private fun ensureHubTransport()', '        return if (interactive && !oneShot) START_STICKY else START_NOT_STICKY\n    }\n\n    private fun ensureHubTransport()', 1)
+          rep(
+              svc,
+              '''    private fun disconnectAll() {
+        connections.values.forEach { it.disconnect() }
+        connections.clear()
+        connectPlan.clear()
+        connectingMac = null
+    }
+''',
+              '''    private fun disconnectAll() {
+        connections.values.forEach { it.disconnect() }
+        connections.clear()
+        readyMacs.clear()
+        connectPlan.clear()
+        connectingMac = null
+    }
+'''
+          )
+
+          between(
+              svc,
+              '    private fun startScan(durationMs: Long, onDone: (() -> Unit)? = null) {',
+              '    private val scanCallback = object : ScanCallback() {',
+              '''    private fun legacyLocationEnabled(): Boolean {
+        if (Build.VERSION.SDK_INT > 30) return true
+        val lm = getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return true
+        return try {
+            if (Build.VERSION.SDK_INT >= 28) lm.isLocationEnabled
+            else lm.isProviderEnabled(LocationManager.GPS_PROVIDER) || lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+        } catch (_: Throwable) { true }
+    }
+
+    private fun startScan(durationMs: Long, onDone: (() -> Unit)? = null) {
+        if (scanActive) {
+            onDone?.invoke()
+            return
+        }
+        if (!hasScanPermission()) {
+            event(EVENT_ERROR, message = "BLE scan: немає дозволу геолокації / Nearby devices")
+            onDone?.invoke()
+            return
+        }
+        if (!adapter.isEnabled) {
+            event(EVENT_ERROR, message = "BLE scan: Bluetooth вимкнено")
+            onDone?.invoke()
+            return
+        }
+        if (!legacyLocationEnabled()) {
+            // Android 10 commonly blocks BLE discovery when the system Location toggle is off.
+            // Direct connection to saved QStar MACs still works, so do not make this fatal.
+            event(EVENT_ERROR, message = "BLE scan: Android 10 блокує пошук без увімкненої Геолокації; пробую збережені MAC")
+            onDone?.invoke()
+            return
+        }
+        val scanner = try { adapter.bluetoothLeScanner } catch (_: Throwable) { null }
+        if (scanner == null) {
+            event(EVENT_ERROR, message = "BLE scan: сканер недоступний; пробую збережені MAC")
+            onDone?.invoke()
+            return
+        }
+        scanActive = true
+        scanDoneCallback = onDone
+        discovered.clear()
+        try {
+            scanner.startScan(scanCallback)
+            event(EVENT_SCAN, message = "scan_started")
+        } catch (t: Throwable) {
+            scanActive = false
+            scanDoneCallback = null
+            event(EVENT_ERROR, message = "BLE scan failed: ${t.javaClass.simpleName}: ${t.message.orEmpty()}")
+            onDone?.invoke()
+            return
+        }
+        handler.postDelayed({ finishScan("scan_finished") }, durationMs)
+    }
+
+    private fun finishScan(message: String) {
+        if (!scanActive && scanDoneCallback == null) return
+        if (scanActive) {
+            try { adapter.bluetoothLeScanner?.stopScan(scanCallback) } catch (_: Throwable) { }
+        }
+        scanActive = false
+        event(EVENT_SCAN, message = message)
+        val callback = scanDoneCallback
+        scanDoneCallback = null
+        callback?.invoke()
+        if (!interactive && !bootPending && connections.values.none { it.isReady() }) shutdownSoon()
+    }
+
+'''
+          )
+          rep(
+              svc,
+              '''        override fun onScanFailed(errorCode: Int) {
+            scanActive = false
+            event(EVENT_ERROR, message = "BLE scan error $errorCode")
+        }
+''',
+              '''        override fun onScanFailed(errorCode: Int) {
+            event(EVENT_ERROR, message = "BLE scan error $errorCode; пробую збережені MAC")
+            finishScan("scan_failed_$errorCode")
+        }
+'''
+          )
+
+          between(
+              svc,
+              '    private fun ensureConnections(afterReady: (() -> Unit)? = null) {',
+              '    private fun onAllReady() {',
+              '''    private var pendingAfterReady: (() -> Unit)? = null
+
+    private fun allSelectedReady(): Boolean {
+        val refs = prefs.devices()
+        return refs.isNotEmpty() && refs.all { connections[it.mac]?.isReady() == true }
+    }
+
+    private fun ensureConnections(afterReady: (() -> Unit)? = null) {
+        if (remoteTakeover) return
+        if (afterReady != null) pendingAfterReady = afterReady
+        if (!hasConnectPermission() || !adapter.isEnabled) {
+            event(EVENT_ERROR, message = "Bluetooth permission or adapter missing")
+            scheduleReconnect(2_000)
+            return
+        }
+        val refs = prefs.devices()
+        if (refs.isEmpty()) {
+            event(EVENT_ERROR, message = "No QStar devices selected")
+            return
+        }
+
+        val selected = refs.map { it.mac }.toSet()
+        connections.keys.filter { it !in selected }.toList().forEach { mac ->
+            connections.remove(mac)?.disconnect()
+            readyMacs.remove(mac)
+        }
+
+        if (allSelectedReady()) {
+            onAllReady()
+            return
+        }
+
+        refs.forEach { ref ->
+            if (connections[ref.mac]?.isReady() != true && connectingMac != ref.mac && connectPlan.none { it.mac == ref.mac }) {
+                connectPlan.add(ref)
+            }
+        }
+        pumpConnectPlan()
+        scheduleReconnect()
+    }
+
+    private fun pumpConnectPlan() {
+        if (remoteTakeover || connectingMac != null) return
+        while (connectPlan.isNotEmpty()) {
+            val ref = connectPlan.removeFirst()
+            if (connections[ref.mac]?.isReady() == true) continue
+            val device = try { adapter.getRemoteDevice(ref.mac) }
+            catch (_: Throwable) { continue }
+            val connection = LampConnection(this, device, prefs::password, this)
+            connections[ref.mac]?.disconnect()
+            connections[ref.mac] = connection
+            readyMacs.remove(ref.mac)
+            connectingMac = ref.mac
+            connection.connect()
+            handler.postDelayed({
+                if (connectingMac == ref.mac && !connection.isReady()) {
+                    event(EVENT_ERROR, ref.mac, ref.name, "Connect timeout")
+                    connection.disconnect()
+                    connectingMac = null
+                    scheduleReconnect(350)
+                }
+            }, 12_000)
+            return
+        }
+        if (allSelectedReady()) onAllReady() else scheduleReconnect()
+    }
+
+    private fun scheduleReconnect(delayMs: Long = 1_200L) {
+        if (reconnectScheduled || remoteTakeover) return
+        val needed = interactive || bootPending || oneShot || latestCct != null || pendingAfterReady != null
+        if (!needed) return
+        reconnectScheduled = true
+        handler.postDelayed({
+            reconnectScheduled = false
+            if (remoteTakeover || allSelectedReady()) {
+                if (allSelectedReady()) onAllReady()
+                return@postDelayed
+            }
+            reconnectRounds++
+            if (reconnectRounds % 5 == 0 && tryRecoveryScan()) return@postDelayed
+            prefs.devices().forEach { ref ->
+                if (connections[ref.mac]?.isReady() != true && connectingMac != ref.mac && connectPlan.none { it.mac == ref.mac }) {
+                    connectPlan.add(ref)
+                }
+            }
+            pumpConnectPlan()
+            if (!allSelectedReady()) scheduleReconnect()
+        }, delayMs)
+    }
+
+    private fun tryRecoveryScan(): Boolean {
+        val now = SystemClock.elapsedRealtime()
+        if (scanActive || !hasScanPermission() || !adapter.isEnabled || !legacyLocationEnabled()) return false
+        if (now - lastRecoveryScanAt < 12_000) return false
+        lastRecoveryScanAt = now
+        startScan(3_000) { ensureConnections() }
+        return true
+    }
+
+'''
+          )
+
+          between(
+              svc,
+              '    private fun onAllReady() {',
+              '    private fun pumpLatestCct() {',
+              '''    private fun onAllReady() {
+        if (!allSelectedReady()) {
+            scheduleReconnect()
+            return
+        }
+        reconnectRounds = 0
+        if (bootPending) {
+            bootPending = false
+            runBootRoutine()
+            return
+        }
+        if (safetyFallbackActive) {
+            // Keep both lamps in a deterministic safe state until the PAIR is back.
+            sendFrameAll(QStarProtocol.POWER_ON) {
+                sendFrameAll(QStarProtocol.cctFrame(100, 100)) {
+                    safetyFallbackActive = false
+                    handler.postDelayed({ restoreDesiredAfterSafety() }, 100)
+                }
+            }
+            return
+        }
+        finishReadyCycle()
+    }
+
+    private fun finishReadyCycle() {
+        val callback = pendingAfterReady
+        pendingAfterReady = null
+        callback?.invoke()
+        pumpLatestCct()
+        if (interactive && !rssiLoop) startRssiLoop()
+    }
+
+    private fun restoreDesiredAfterSafety() {
+        if (!allSelectedReady()) {
+            safetyFallbackActive = true
+            scheduleReconnect(250)
+            return
+        }
+        if (prefs.power) {
+            sendFrameAll(QStarProtocol.POWER_ON) {
+                sendFrameAll(QStarProtocol.cctFrame(prefs.white, prefs.brightness)) { finishReadyCycle() }
+            }
+        } else {
+            sendFrameAll(QStarProtocol.POWER_OFF) { finishReadyCycle() }
+        }
+    }
+
+    private fun activateSafetyFallback(reason: String) {
+        if (remoteTakeover) return
+        stopStrobeInternal(restore = false)
+        safetyFallbackActive = true
+        latestCct = null
+        event(EVENT_PHASE, message = "failsafe_white_100:$reason")
+        sendFrameReady(QStarProtocol.POWER_ON) {
+            sendFrameReady(QStarProtocol.cctFrame(100, 100)) { }
+        }
+        scheduleReconnect(250)
+    }
+
+    private fun sendSafetyTo(connection: LampConnection, done: () -> Unit) {
+        connection.writeControl(QStarProtocol.POWER_ON) {
+            connection.writeControl(QStarProtocol.cctFrame(100, 100)) { done() }
+        }
+    }
+
+'''
+          )
+          rep(
+              svc,
+              '''    private fun pumpLatestCct() {
+        if (sendingCct || strobeActive) return
+        val desired = latestCct ?: return
+''',
+              '''    private fun pumpLatestCct() {
+        if (sendingCct || strobeActive) return
+        if (!allSelectedReady()) {
+            scheduleReconnect()
+            return
+        }
+        val desired = latestCct ?: return
+'''
+          )
+          between(
+              svc,
+              '    private fun sendFrameAll(frame: ByteArray, done: () -> Unit) {',
+              '    private fun applyPowerStates(states: List<Boolean>, done: () -> Unit) {',
+              '''    private fun sendFrameAll(frame: ByteArray, done: () -> Unit) {
+        val refs = prefs.devices()
+        if (refs.isEmpty() || refs.any { connections[it.mac]?.isReady() != true }) {
+            event(EVENT_ERROR, message = "Waiting for both QStar lamps")
+            scheduleReconnect()
+            done()
+            return
+        }
+        val list = refs.map { connections[it.mac]!! }
+        fun sendAt(index: Int) {
+            if (index >= list.size) {
+                done()
+                return
+            }
+            if (!allSelectedReady()) {
+                done()
+                return
+            }
+            val c = list[index]
+            c.writeControl(frame) { ok ->
+                event(if (ok) EVENT_WRITE else EVENT_ERROR, c.mac, c.name, QStarProtocol.hex(frame))
+                handler.postDelayed({ sendAt(index + 1) }, 45)
+            }
+        }
+        sendAt(0)
+    }
+
+    private fun sendFrameReady(frame: ByteArray, done: () -> Unit) {
+        val list = prefs.devices().mapNotNull { connections[it.mac] }.filter { it.isReady() }
+        fun sendAt(index: Int) {
+            if (index >= list.size) { done(); return }
+            val c = list[index]
+            c.writeControl(frame) {
+                handler.postDelayed({ sendAt(index + 1) }, 35)
+            }
+        }
+        sendAt(0)
+    }
+
+'''
+          )
+          rep(
+              svc,
+              '''            BlePrefs.StartupMode.FADE_TO_TARGET -> {
+                prefs.power = true
+                prefs.brightness = prefs.startBrightness
+''',
+              '''            BlePrefs.StartupMode.FADE_TO_TARGET -> {
+                prefs.power = true
+                // If BLE drops mid-fade, recovery should settle on the requested target, not an old color.
+                prefs.white = prefs.targetWhite
+                prefs.brightness = prefs.startBrightness
+'''
+          )
+          rep(
+              svc,
+              '''    override fun onReady(mac: String) {
+        event(EVENT_READY, mac, connections[mac]?.name, "ready")
+        if (connectingMac == mac) connectingMac = null
+        handler.postDelayed({ pumpConnectPlan() }, 550)
+    }
+''',
+              '''    override fun onReady(mac: String) {
+        event(EVENT_READY, mac, connections[mac]?.name, "ready")
+        readyMacs.add(mac)
+        if (connectingMac == mac) connectingMac = null
+        val connection = connections[mac]
+        if (safetyFallbackActive && connection != null) {
+            sendSafetyTo(connection) { handler.postDelayed({ pumpConnectPlan() }, 180) }
+        } else {
+            handler.postDelayed({ pumpConnectPlan() }, 300)
+        }
+    }
+'''
+          )
+          rep(
+              svc,
+              '''    override fun onError(mac: String, message: String) {
+        event(EVENT_ERROR, mac, connections[mac]?.name, message)
+        if (connectingMac == mac) {
+            connectingMac = null
+            handler.postDelayed({ pumpConnectPlan() }, 300)
+        }
+    }
+
+    override fun onDisconnected(mac: String, status: Int) {
+        event(EVENT_DISCONNECTED, mac, connections[mac]?.name, "status=$status")
+        if (interactive && !remoteTakeover) {
+            val ref = prefs.devices().firstOrNull { it.mac == mac } ?: return
+            handler.postDelayed({
+                if (connections[mac]?.isReady() != true && !connectPlan.any { it.mac == mac }) {
+                    connectPlan.add(ref)
+                    pumpConnectPlan()
+                }
+            }, 1_500)
+        }
+    }
+''',
+              '''    override fun onError(mac: String, message: String) {
+        event(EVENT_ERROR, mac, connections[mac]?.name, message)
+        val wasReady = readyMacs.remove(mac)
+        if (connectingMac == mac) connectingMac = null
+        if (wasReady && !remoteTakeover) activateSafetyFallback("error:$message")
+        if (!remoteTakeover) scheduleReconnect(350)
+    }
+
+    override fun onDisconnected(mac: String, status: Int) {
+        event(EVENT_DISCONNECTED, mac, connections[mac]?.name, "status=$status")
+        val wasReady = readyMacs.remove(mac)
+        if (connectingMac == mac) connectingMac = null
+        if (wasReady && !remoteTakeover) activateSafetyFallback("disconnect:$status")
+        if (!remoteTakeover) scheduleReconnect(300)
+    }
+'''
+          )
+          rep(
+              svc,
+              '''    override fun onRemoteConfig(config: JSONObject): Boolean {
+        val changed = prefs.applySyncConfig(config)
+        if (changed) handler.post { event(EVENT_CONFIG_SYNC, message = "config_from_phone") }
+        return changed
+    }
+''',
+              '''    override fun onRemoteConfig(config: JSONObject): Boolean {
+        // Phone is authoritative for a config push; this avoids clock/revision races between devices.
+        val changed = prefs.applySyncConfig(config, force = true)
+        if (changed) handler.post {
+            latestCct = prefs.white to prefs.brightness
+            event(EVENT_CONFIG_SYNC, message = "config_from_phone")
+            ensureConnections {
+                if (prefs.power) {
+                    sendFrameAll(QStarProtocol.POWER_ON) { pumpLatestCct() }
+                } else {
+                    sendFrameAll(QStarProtocol.POWER_OFF) { }
+                }
+            }
+        }
+        return changed
+    }
+'''
+          )
+          rep(
+              svc,
+              '''            if (active) {
+                disconnectAll()
+''',
+              '''            if (active) {
+                safetyFallbackActive = false
+                disconnectAll()
+'''
+          )
+          rep(
+              svc,
+              '''        fun start(context: Context, intent: Intent) {
+            ContextCompat.startForegroundService(context, intent.setClass(context, QStarBleService::class.java))
+        }
+''',
+              '''        fun start(context: Context, intent: Intent) {
+            try {
+                ContextCompat.startForegroundService(context, intent.setClass(context, QStarBleService::class.java))
+            } catch (t: Throwable) {
+                Log.e("QStarBle", "Unable to start BLE service", t)
+            }
+        }
+'''
+          )
+
+          Path('.hotfix-v031-applied').write_text('QStarLight 0.3.1 stability hotfix applied\n')
+          PY
+
+      - name: Set up JDK 17
+        if: steps.marker.outputs.skip == 'false'
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Android SDK 35
+        if: steps.marker.outputs.skip == 'false'
+        shell: bash
+        run: |
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+
+      - name: Set up Gradle 8.9
+        if: steps.marker.outputs.skip == 'false'
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Test and build hotfix
+        if: steps.marker.outputs.skip == 'false'
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle :app:testDebugUnitTest --stacktrace
+          gradle :app:assembleDebug --stacktrace
+          test -s app/build/outputs/apk/debug/app-debug.apk
+          unzip -t app/build/outputs/apk/debug/app-debug.apk >/dev/null
+
+      - name: Commit source hotfix
+        if: steps.marker.outputs.skip == 'false'
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .gradle app/build build
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A -- . ':(exclude).github/workflows/**'
+          git diff --cached --quiet && exit 0
+          git commit -m 'Fix BLE recovery, sync, CCT mapping and phone stability'
+          git push origin HEAD:main
