@@ -17,6 +17,8 @@ import android.provider.Settings
 import android.view.View
 import android.view.MotionEvent
 import android.view.ViewConfiguration
+import android.view.VelocityTracker
+import android.view.animation.AccelerateDecelerateInterpolator
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Button
@@ -29,6 +31,9 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import org.json.JSONObject
 import ua.grey.qstarlight.ble.BlePrefs
 import ua.grey.qstarlight.ble.QStarBleService
@@ -57,6 +62,7 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var controlPage: ScrollView
     private lateinit var settingsPage: ScrollView
+    private lateinit var pageContainer: View
     private lateinit var tabControl: Button
     private lateinit var tabSettings: Button
 
@@ -122,6 +128,15 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnPushUpdate: Button
     private lateinit var btnInstallPermission: Button
 
+    private var showingSettings = false
+    private var swipeDownX = 0f
+    private var swipeDownY = 0f
+    private var pageSwipeActive = false
+    private var pageSwipeBlocked = false
+    private var velocityTracker: VelocityTracker? = null
+    private val pageSwipeSlop by lazy { ViewConfiguration.get(this).scaledTouchSlop }
+    private val pageSwipeMinDistance by lazy { 64f * resources.displayMetrics.density }
+
     private val startupLabels = arrayOf(
         "Відновити останній стан",
         "Тільки стартовий колір",
@@ -140,7 +155,9 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         setContentView(R.layout.activity_main)
+        applySystemBarInsets()
         prefs = BlePrefs(this).also { it.ensureDefaults() }
         bindViews()
         configureUi()
@@ -151,6 +168,7 @@ class MainActivity : AppCompatActivity() {
     private fun bindViews() {
         controlPage = findViewById(R.id.controlPage)
         settingsPage = findViewById(R.id.settingsPage)
+        pageContainer = findViewById(R.id.pageContainer)
         tabControl = findViewById(R.id.tabControl)
         tabSettings = findViewById(R.id.tabSettings)
 
@@ -513,10 +531,142 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showPage(settings: Boolean) {
+        showingSettings = settings
         controlPage.visibility = if (settings) View.GONE else View.VISIBLE
         settingsPage.visibility = if (settings) View.VISIBLE else View.GONE
+        controlPage.translationX = 0f
+        settingsPage.translationX = 0f
+        controlPage.alpha = 1f
+        settingsPage.alpha = 1f
         tabControl.isSelected = !settings
         tabSettings.isSelected = settings
+    }
+
+    private fun applySystemBarInsets() {
+        val root = findViewById<View>(R.id.rootLayout)
+        val initialStart = root.paddingStart
+        val initialTop = root.paddingTop
+        val initialEnd = root.paddingEnd
+        val initialBottom = root.paddingBottom
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view, windowInsets ->
+            val bars = windowInsets.getInsets(
+                WindowInsetsCompat.Type.statusBars() or
+                    WindowInsetsCompat.Type.navigationBars() or
+                    WindowInsetsCompat.Type.displayCutout()
+            )
+            view.setPaddingRelative(
+                initialStart + bars.left,
+                initialTop + bars.top,
+                initialEnd + bars.right,
+                initialBottom + bars.bottom
+            )
+            windowInsets
+        }
+        ViewCompat.requestApplyInsets(root)
+    }
+
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                swipeDownX = event.rawX
+                swipeDownY = event.rawY
+                pageSwipeActive = false
+                pageSwipeBlocked = !isInsideView(event.rawX, event.rawY, pageContainer) ||
+                    allSeekBars().any { isInsideView(event.rawX, event.rawY, it) }
+                velocityTracker?.recycle()
+                velocityTracker = VelocityTracker.obtain().also { it.addMovement(event) }
+            }
+            MotionEvent.ACTION_MOVE -> {
+                velocityTracker?.addMovement(event)
+                if (!pageSwipeBlocked) {
+                    val dx = event.rawX - swipeDownX
+                    val dy = event.rawY - swipeDownY
+                    if (!pageSwipeActive && kotlin.math.abs(dx) > pageSwipeSlop &&
+                        kotlin.math.abs(dx) > kotlin.math.abs(dy) * 1.25f
+                    ) {
+                        val allowedDirection = (dx < 0 && !showingSettings) || (dx > 0 && showingSettings)
+                        if (allowedDirection) {
+                            pageSwipeActive = true
+                            val cancel = MotionEvent.obtain(event).apply { action = MotionEvent.ACTION_CANCEL }
+                            super.dispatchTouchEvent(cancel)
+                            cancel.recycle()
+                        } else {
+                            pageSwipeBlocked = true
+                        }
+                    }
+                    if (pageSwipeActive) {
+                        updatePageSwipe(dx)
+                        return true
+                    }
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                velocityTracker?.addMovement(event)
+                if (pageSwipeActive) {
+                    val dx = event.rawX - swipeDownX
+                    velocityTracker?.computeCurrentVelocity(1000)
+                    val velocityX = velocityTracker?.xVelocity ?: 0f
+                    val complete = event.actionMasked == MotionEvent.ACTION_UP &&
+                        (kotlin.math.abs(dx) >= pageSwipeMinDistance || kotlin.math.abs(velocityX) >= 700f)
+                    finishPageSwipe(complete)
+                    velocityTracker?.recycle()
+                    velocityTracker = null
+                    return true
+                }
+                velocityTracker?.recycle()
+                velocityTracker = null
+            }
+        }
+        return super.dispatchTouchEvent(event)
+    }
+
+    private fun updatePageSwipe(dx: Float) {
+        val width = pageContainer.width.toFloat().coerceAtLeast(1f)
+        val current = if (showingSettings) settingsPage else controlPage
+        val incoming = if (showingSettings) controlPage else settingsPage
+        val direction = if (showingSettings) -1f else 1f
+        incoming.visibility = View.VISIBLE
+        current.translationX = dx
+        incoming.translationX = dx + direction * width
+        val progress = (kotlin.math.abs(dx) / width).coerceIn(0f, 1f)
+        current.alpha = 1f - progress * 0.25f
+        incoming.alpha = 0.75f + progress * 0.25f
+    }
+
+    private fun finishPageSwipe(complete: Boolean) {
+        val targetSettings = if (complete) !showingSettings else showingSettings
+        val width = pageContainer.width.toFloat().coerceAtLeast(1f)
+        val current = if (showingSettings) settingsPage else controlPage
+        val incoming = if (showingSettings) controlPage else settingsPage
+        val currentTarget = if (complete) {
+            if (showingSettings) width else -width
+        } else 0f
+        val incomingTarget = if (complete) 0f else {
+            if (showingSettings) -width else width
+        }
+        listOf(current to currentTarget, incoming to incomingTarget).forEach { (view, target) ->
+            view.animate()
+                .translationX(target)
+                .alpha(if (complete && view === current) 0.75f else 1f)
+                .setDuration(180L)
+                .setInterpolator(AccelerateDecelerateInterpolator())
+                .start()
+        }
+        handler.postDelayed({ showPage(targetSettings) }, 180L)
+    }
+
+    private fun allSeekBars(): List<SeekBar> = listOf(
+        seekTemp, seekBrightness, seekStartWhite, seekTargetWhite, seekStartBrightness,
+        seekFadeDuration, seekFadeSteps, seekStrobeWhite, seekStrobeBrightness,
+        seekStrobeOn, seekStrobeOff, seekStrobePause
+    )
+
+    private fun isInsideView(rawX: Float, rawY: Float, view: View): Boolean {
+        if (!view.isShown) return false
+        val location = IntArray(2)
+        view.getLocationOnScreen(location)
+        return rawX >= location[0] && rawX < location[0] + view.width &&
+            rawY >= location[1] && rawY < location[1] + view.height
     }
 
     private fun changeRole(role: BlePrefs.Role) {
