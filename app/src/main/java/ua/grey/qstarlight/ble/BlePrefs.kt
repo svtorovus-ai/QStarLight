@@ -33,10 +33,29 @@ class BlePrefs(private val context: Context) {
         }
     }
 
-    fun devices(): List<DeviceRef> = listOfNotNull(
-        device(KEY_MAC_1, KEY_NAME_1),
-        device(KEY_MAC_2, KEY_NAME_2)
-    ).distinctBy { it.mac }
+    fun devices(): List<DeviceRef> = canonicalOrder(
+        listOfNotNull(
+            device(KEY_MAC_1, KEY_NAME_1),
+            device(KEY_MAC_2, KEY_NAME_2)
+        ).distinctBy { it.mac }
+    )
+
+    fun lampSide(ref: DeviceRef): String = when {
+        ref.name.equals(RIGHT_NAME, true) || ref.mac.equals(RIGHT_DEFAULT_MAC, true) -> "Права фара"
+        ref.name.equals(LEFT_NAME, true) || ref.mac.equals(LEFT_DEFAULT_MAC, true) -> "Ліва фара"
+        else -> "Фара"
+    }
+
+    fun lampDisplayName(ref: DeviceRef): String = "${lampSide(ref)} • ${ref.name}"
+
+    private fun canonicalOrder(input: List<DeviceRef>): List<DeviceRef> =
+        input.sortedWith(compareBy<DeviceRef> {
+            when {
+                it.name.equals(RIGHT_NAME, true) || it.mac.equals(RIGHT_DEFAULT_MAC, true) -> 0
+                it.name.equals(LEFT_NAME, true) || it.mac.equals(LEFT_DEFAULT_MAC, true) -> 1
+                else -> 2
+            }
+        }.thenBy { it.name })
 
     private fun device(macKey: String, nameKey: String): DeviceRef? {
         val mac = prefs.getString(macKey, null)?.trim().orEmpty()
@@ -45,8 +64,9 @@ class BlePrefs(private val context: Context) {
     }
 
     fun setDevices(devices: List<DeviceRef>, touch: Boolean = true) {
-        val first = devices.getOrNull(0)
-        val second = devices.getOrNull(1)
+        val ordered = canonicalOrder(devices)
+        val first = ordered.getOrNull(0)
+        val second = ordered.getOrNull(1)
         val e = prefs.edit()
             .putString(KEY_MAC_1, first?.mac)
             .putString(KEY_NAME_1, first?.name)
@@ -157,6 +177,21 @@ class BlePrefs(private val context: Context) {
     var silentRootInstall: Boolean
         get() = prefs.getBoolean(KEY_SILENT_ROOT_INSTALL, false)
         set(value) { prefs.edit().putBoolean(KEY_SILENT_ROOT_INSTALL, value).apply() }
+
+    val phoneSessionUntil: Long
+        get() = prefs.getLong(KEY_PHONE_SESSION_UNTIL, 0L)
+
+    fun beginPhoneSession(now: Long = System.currentTimeMillis()): Long {
+        val until = now + PHONE_SESSION_MS
+        prefs.edit().putLong(KEY_PHONE_SESSION_UNTIL, until).apply()
+        return until
+    }
+
+    fun phoneSessionActive(now: Long = System.currentTimeMillis()): Boolean = phoneSessionUntil > now
+
+    fun clearPhoneSession() {
+        prefs.edit().remove(KEY_PHONE_SESSION_UNTIL).apply()
+    }
 
     // Cross-device synchronized startup configuration.
     var startupMode: StartupMode
@@ -328,6 +363,13 @@ class BlePrefs(private val context: Context) {
         private const val KEY_REMOTE_KEEPALIVE = "remote_keepalive"
         private const val KEY_AUTO_PUSH_UPDATES = "auto_push_updates"
         private const val KEY_SILENT_ROOT_INSTALL = "silent_root_install"
+        private const val KEY_PHONE_SESSION_UNTIL = "phone_session_until"
+
+        const val RIGHT_NAME = "QStar~D35D"
+        const val LEFT_NAME = "QStar~F072"
+        const val RIGHT_DEFAULT_MAC = "C2:15:11:00:D3:5D"
+        const val LEFT_DEFAULT_MAC = "F2:16:11:00:F0:72"
+        const val PHONE_SESSION_MS = 30L * 60L * 1000L
 
         private const val KEY_CONFIG_REVISION = "sync_config_revision"
         private const val KEY_STARTUP_MODE = "startup_mode"
