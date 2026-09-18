@@ -83,6 +83,17 @@ jobs:
         if: ${{ env.QSTAR_KEYSTORE_B64 == '' }}
         run: unzip -t app/build/outputs/apk/debug/app-debug.apk >/dev/null
 
+      - name: Verify persistent debug signer
+        if: ${{ env.QSTAR_KEYSTORE_B64 == '' }}
+        shell: bash
+        run: |
+          KS_SHA="$(keytool -exportcert -alias androiddebugkey -keystore "$HOME/.android/debug.keystore" -storepass android 2>/dev/null | sha256sum | awk '{print $1}')"
+          APK_SHA="$("$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs app/build/outputs/apk/debug/app-debug.apk | awk -F': ' '/certificate SHA-256 digest/ {print $2; exit}')"
+          echo "Keystore certificate: $KS_SHA"
+          echo "APK certificate:      $APK_SHA"
+          test -n "$KS_SHA"
+          test "$KS_SHA" = "$APK_SHA"
+
       - name: Verify release APK
         if: ${{ env.QSTAR_KEYSTORE_B64 != '' }}
         run: unzip -t app/build/outputs/apk/release/app-release.apk >/dev/null
