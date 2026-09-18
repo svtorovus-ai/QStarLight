@@ -303,7 +303,10 @@ class MainActivity : AppCompatActivity() {
         tabSettings.setOnClickListener { showPage(true) }
 
         findViewById<Button>(R.id.btnReconnect).setOnClickListener {
-            if (ensurePermissions()) ControlDispatcher.connect(this)
+            if (ensurePermissions()) {
+                ControlDispatcher.connect(this)
+                Toast.makeText(this, "Підключаю те, що зараз offline…", Toast.LENGTH_SHORT).show()
+            }
         }
         tvLinkStatus.setOnClickListener { retryHubConnection() }
         tvRemoteStatus.setOnClickListener { retryHubConnection() }
@@ -558,9 +561,9 @@ class MainActivity : AppCompatActivity() {
         }
         if (hub) {
             setHubStatus(UiLinkState.CONNECTED, "Магнітола • HUB активний")
-        } else if (RemoteLinkService.connected) {
+        } else if (RemoteLinkService.connected || prefs.hubRuntimeState == BlePrefs.RuntimeLinkState.CONNECTED) {
             setHubStatus(UiLinkState.CONNECTED, "Магнітола • підключено")
-        } else if (hubUiState == UiLinkState.CONNECTING) {
+        } else if (hubUiState == UiLinkState.CONNECTING || prefs.hubRuntimeState == BlePrefs.RuntimeLinkState.CONNECTING) {
             setHubStatus(UiLinkState.CONNECTING, "Магнітола • підключення…")
         } else {
             setHubStatus(UiLinkState.OFFLINE, "Магнітола • немає з'єднання")
@@ -676,7 +679,11 @@ class MainActivity : AppCompatActivity() {
                 view.setTextColor(stateColor(UiLinkState.OFFLINE))
                 return
             }
-            val state = stateByMac[d.mac] ?: UiLinkState.OFFLINE
+            val state = stateByMac[d.mac] ?: when (prefs.lampRuntimeState(d.mac)) {
+                BlePrefs.RuntimeLinkState.CONNECTED -> UiLinkState.CONNECTED
+                BlePrefs.RuntimeLinkState.CONNECTING -> UiLinkState.CONNECTING
+                BlePrefs.RuntimeLinkState.OFFLINE -> UiLinkState.OFFLINE
+            }
             val status = statusByMac[d.mac] ?: when (state) {
                 UiLinkState.CONNECTED -> "підключено"
                 UiLinkState.CONNECTING -> "підключення…"
