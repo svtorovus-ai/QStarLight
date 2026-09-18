@@ -321,7 +321,27 @@ class RemoteLinkService : Service() {
                         broadcast(EVENT_CONFIG_SYNC, "Налаштування синхронні", host, line)
                     }
                 }
-                "ble" -> broadcast(EVENT_HUB_BLE, json.optString("message", "BLE"), host, line)
+                "ble" -> {
+                    val mac = json.optString("mac")
+                    val event = json.optString("event")
+                    if (mac.isNotBlank()) {
+                        val state = when (event) {
+                            QStarBleService.EVENT_READY -> BlePrefs.RuntimeLinkState.CONNECTED
+                            QStarBleService.EVENT_PHASE -> when (json.optString("message")) {
+                                "READY" -> BlePrefs.RuntimeLinkState.CONNECTED
+                                "CONNECTING", "DISCOVERING", "SUBSCRIBING", "HANDSHAKE" ->
+                                    BlePrefs.RuntimeLinkState.CONNECTING
+                                else -> prefs.lampRuntimeState(mac)
+                            }
+                            QStarBleService.EVENT_DISCONNECTED, QStarBleService.EVENT_ERROR ->
+                                BlePrefs.RuntimeLinkState.OFFLINE
+                            else -> prefs.lampRuntimeState(mac)
+                        }
+                        prefs.setLampRuntimeState(mac, state)
+                        QStarWidgetProvider.refresh(this)
+                    }
+                    broadcast(EVENT_HUB_BLE, json.optString("message", "BLE"), host, line)
+                }
                 "ack" -> broadcast(EVENT_ACK, json.optString("message", "OK"), host, line)
                 else -> broadcast(EVENT_MESSAGE, line, host, line)
             }
@@ -348,10 +368,12 @@ class RemoteLinkService : Service() {
             broadcast(EVENT_ROUTE, "Команда через магнітолу", currentHost)
         } else if (cmd == ControlDispatcher.CMD_CONNECT) {
             pendingConnectMissing = true
-            if (prefs.forceDirect || prefs.directFallback) {
-                dispatchDirect(intent)
-            }
+            if (prefs.forceDirect || prefs.directFallback) dispatchDirect(intent)
             broadcast(EVENT_CONNECTING, "Підключаю відсутні пристрої…")
+        } else if (cmd == ControlDispatcher.CMD_CONNECT_DEVICE) {
+            // A tap on a lamp means "try this lamp now" even if the HUB is currently offline.
+            dispatchDirect(intent)
+            broadcast(EVENT_CONNECTING, "Підключаю вибрану фару…")
         } else if (prefs.directFallback) {
             dispatchDirect(intent)
             broadcast(EVENT_ROUTE, "Магнітола offline, команда напряму")
