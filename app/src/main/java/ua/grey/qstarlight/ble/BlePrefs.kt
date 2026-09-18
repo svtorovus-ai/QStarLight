@@ -51,8 +51,8 @@ class BlePrefs(private val context: Context) {
     private fun canonicalOrder(input: List<DeviceRef>): List<DeviceRef> =
         input.sortedWith(compareBy<DeviceRef> {
             when {
-                it.name.equals(RIGHT_NAME, true) || it.mac.equals(RIGHT_DEFAULT_MAC, true) -> 0
-                it.name.equals(LEFT_NAME, true) || it.mac.equals(LEFT_DEFAULT_MAC, true) -> 1
+                it.name.equals(LEFT_NAME, true) || it.mac.equals(LEFT_DEFAULT_MAC, true) -> 0
+                it.name.equals(RIGHT_NAME, true) || it.mac.equals(RIGHT_DEFAULT_MAC, true) -> 1
                 else -> 2
             }
         }.thenBy { it.name })
@@ -178,19 +178,60 @@ class BlePrefs(private val context: Context) {
         get() = prefs.getBoolean(KEY_SILENT_ROOT_INSTALL, false)
         set(value) { prefs.edit().putBoolean(KEY_SILENT_ROOT_INSTALL, value).apply() }
 
-    val phoneSessionUntil: Long
-        get() = prefs.getLong(KEY_PHONE_SESSION_UNTIL, 0L)
+    enum class RuntimeLinkState { OFFLINE, CONNECTING, CONNECTED }
 
-    fun beginPhoneSession(now: Long = System.currentTimeMillis()): Long {
-        val until = now + PHONE_SESSION_MS
-        prefs.edit().putLong(KEY_PHONE_SESSION_UNTIL, until).apply()
+    var hubRuntimeState: RuntimeLinkState
+        get() = runCatching {
+            RuntimeLinkState.valueOf(prefs.getString(KEY_RUNTIME_HUB_STATE, RuntimeLinkState.OFFLINE.name)!!)
+        }.getOrDefault(RuntimeLinkState.OFFLINE)
+        set(value) { prefs.edit().putString(KEY_RUNTIME_HUB_STATE, value.name).apply() }
+
+    fun lampRuntimeState(mac: String): RuntimeLinkState = runCatching {
+        RuntimeLinkState.valueOf(
+            prefs.getString(KEY_RUNTIME_LAMP_PREFIX + mac.uppercase(), RuntimeLinkState.OFFLINE.name)!!
+        )
+    }.getOrDefault(RuntimeLinkState.OFFLINE)
+
+    fun setLampRuntimeState(mac: String, state: RuntimeLinkState) {
+        prefs.edit().putString(KEY_RUNTIME_LAMP_PREFIX + mac.uppercase(), state.name).apply()
+    }
+
+    fun resetRuntimeLinkStates() {
+        val e = prefs.edit().putString(KEY_RUNTIME_HUB_STATE, RuntimeLinkState.OFFLINE.name)
+        devices().forEach { e.putString(KEY_RUNTIME_LAMP_PREFIX + it.mac.uppercase(), RuntimeLinkState.OFFLINE.name) }
+        e.apply()
+    }
+
+    fun anyLampConnected(): Boolean =
+        devices().any { lampRuntimeState(it.mac) == RuntimeLinkState.CONNECTED }
+
+    fun anyPhoneLinkConnected(): Boolean =
+        hubRuntimeState == RuntimeLinkState.CONNECTED || anyLampConnected()
+
+    val phoneOfflineGraceUntil: Long
+        get() = prefs.getLong(KEY_PHONE_OFFLINE_GRACE_UNTIL, 0L)
+
+    fun startPhoneOfflineGrace(now: Long = System.currentTimeMillis()): Long {
+        if (anyPhoneLinkConnected()) {
+            clearPhoneOfflineGrace()
+            return 0L
+        }
+        val current = phoneOfflineGraceUntil
+        if (current > now) return current
+        val until = now + PHONE_OFFLINE_GRACE_MS
+        prefs.edit().putLong(KEY_PHONE_OFFLINE_GRACE_UNTIL, until).apply()
         return until
     }
 
-    fun phoneSessionActive(now: Long = System.currentTimeMillis()): Boolean = phoneSessionUntil > now
+    fun phoneOfflineGraceActive(now: Long = System.currentTimeMillis()): Boolean =
+        !anyPhoneLinkConnected() && phoneOfflineGraceUntil > now
 
-    fun clearPhoneSession() {
-        prefs.edit().remove(KEY_PHONE_SESSION_UNTIL).apply()
+    fun clearPhoneOfflineGrace() {
+        prefs.edit().remove(KEY_PHONE_OFFLINE_GRACE_UNTIL).apply()
+    }
+
+    fun markPhoneLinkAvailable() {
+        clearPhoneOfflineGrace()
     }
 
     // Cross-device synchronized startup configuration.
@@ -363,13 +404,15 @@ class BlePrefs(private val context: Context) {
         private const val KEY_REMOTE_KEEPALIVE = "remote_keepalive"
         private const val KEY_AUTO_PUSH_UPDATES = "auto_push_updates"
         private const val KEY_SILENT_ROOT_INSTALL = "silent_root_install"
-        private const val KEY_PHONE_SESSION_UNTIL = "phone_session_until"
+        private const val KEY_PHONE_OFFLINE_GRACE_UNTIL = "phone_offline_grace_until"
+        private const val KEY_RUNTIME_HUB_STATE = "runtime_hub_state"
+        private const val KEY_RUNTIME_LAMP_PREFIX = "runtime_lamp_"
 
         const val RIGHT_NAME = "QStar~D35D"
         const val LEFT_NAME = "QStar~F072"
         const val RIGHT_DEFAULT_MAC = "C2:15:11:00:D3:5D"
         const val LEFT_DEFAULT_MAC = "F2:16:11:00:F0:72"
-        const val PHONE_SESSION_MS = 30L * 60L * 1000L
+        const val PHONE_OFFLINE_GRACE_MS = 30L * 60L * 1000L
 
         private const val KEY_CONFIG_REVISION = "sync_config_revision"
         private const val KEY_STARTUP_MODE = "startup_mode"
