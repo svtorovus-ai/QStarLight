@@ -931,6 +931,10 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         val wasReady = readyMacs.remove(mac)
         if (connectingMac == mac) connectingMac = null
         if ((wasReady || pairWasReady) && !remoteTakeover) activateSafetyFallback("error:$message")
+        if (prefs.role() == BlePrefs.Role.HUB && readyMacs.isEmpty() && !remoteTakeover) {
+            startupPending = true
+            pairWasReady = false
+        }
         if (!remoteTakeover) scheduleReconnect(120)
     }
 
@@ -942,13 +946,11 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         val wasReady = readyMacs.remove(mac)
         if (connectingMac == mac) connectingMac = null
         if ((wasReady || pairWasReady) && !remoteTakeover) activateSafetyFallback("disconnect:$status")
-        if (prefs.role() == BlePrefs.Role.HUB && readyMacs.isEmpty()) {
-            handler.postDelayed({
-                if (readyMacs.isEmpty()) {
-                    startupPending = true
-                    pairWasReady = false
-                }
-            }, 4_000)
+        if (prefs.role() == BlePrefs.Role.HUB && readyMacs.isEmpty() && !remoteTakeover) {
+            // Controllers can reboot and advertise again in well under four seconds.
+            // Arm startup immediately so the selected startup profile wins over firmware's last state.
+            startupPending = true
+            pairWasReady = false
         }
         if (!remoteTakeover) scheduleReconnect(120)
     }
