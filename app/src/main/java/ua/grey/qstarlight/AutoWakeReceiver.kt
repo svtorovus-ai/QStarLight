@@ -60,14 +60,14 @@ class AutoWakeReceiver : BroadcastReceiver() {
                 if (prefs.role() == BlePrefs.Role.HUB) {
                     QStarBleService.start(context, Intent().setAction(QStarBleService.ACTION_HUB_START))
                 } else {
-                    prefs.beginPhoneSession()
+                    if (!prefs.anyPhoneLinkConnected() && !prefs.phoneOfflineGraceActive()) prefs.startPhoneOfflineGrace()
                     RemoteLinkService.startAuto(context, fromLamp = true)
                 }
             }
             WifiManager.NETWORK_STATE_CHANGED_ACTION,
             WifiManager.WIFI_STATE_CHANGED_ACTION -> {
                 if (prefs.role() == BlePrefs.Role.PHONE) {
-                    prefs.beginPhoneSession()
+                    if (!prefs.anyPhoneLinkConnected() && !prefs.phoneOfflineGraceActive()) prefs.startPhoneOfflineGrace()
                     RemoteLinkService.startAuto(context, fromLamp = false)
                 }
             }
