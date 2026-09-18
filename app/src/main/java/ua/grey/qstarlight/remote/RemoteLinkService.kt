@@ -64,6 +64,10 @@ class RemoteLinkService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (prefs.role() == BlePrefs.Role.PHONE && intent?.action != ACTION_STOP) {
+            if (!prefs.phoneSessionActive()) prefs.beginPhoneSession()
+            scheduleSessionStop()
+        }
         when (intent?.action) {
             ACTION_STOP -> {
                 running.set(false)
