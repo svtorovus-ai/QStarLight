@@ -887,11 +887,15 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
             LampConnection.Phase.DISCONNECTED,
             LampConnection.Phase.ERROR -> BlePrefs.RuntimeLinkState.OFFLINE
         }
-        prefs.setLampRuntimeState(mac, state)
         if (prefs.role() == BlePrefs.Role.PHONE) {
             prefs.setDirectLampRuntimeState(mac, state)
+            if (prefs.forceDirect || prefs.hubRuntimeState != BlePrefs.RuntimeLinkState.CONNECTED) {
+                prefs.setLampRuntimeState(mac, state)
+            }
             if (state == BlePrefs.RuntimeLinkState.CONNECTED) prefs.markPhoneLinkAvailable()
             reconcilePhoneLifetime()
+        } else {
+            prefs.setLampRuntimeState(mac, state)
         }
         QStarWidgetProvider.refresh(this)
         event(EVENT_PHASE, mac, connections[mac]?.name, phase.name)
@@ -900,11 +904,15 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
     override fun onReady(mac: String) {
         event(EVENT_READY, mac, connections[mac]?.name, "ready")
         readyMacs.add(mac)
-        prefs.setLampRuntimeState(mac, BlePrefs.RuntimeLinkState.CONNECTED)
         if (prefs.role() == BlePrefs.Role.PHONE) {
             prefs.setDirectLampRuntimeState(mac, BlePrefs.RuntimeLinkState.CONNECTED)
+            if (prefs.forceDirect || prefs.hubRuntimeState != BlePrefs.RuntimeLinkState.CONNECTED) {
+                prefs.setLampRuntimeState(mac, BlePrefs.RuntimeLinkState.CONNECTED)
+            }
             prefs.markPhoneLinkAvailable()
             reconcilePhoneLifetime()
+        } else {
+            prefs.setLampRuntimeState(mac, BlePrefs.RuntimeLinkState.CONNECTED)
         }
         QStarWidgetProvider.refresh(this)
         if (connectingMac == mac) connectingMac = null
@@ -934,10 +942,14 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
     }
 
     override fun onError(mac: String, message: String) {
-        prefs.setLampRuntimeState(mac, BlePrefs.RuntimeLinkState.OFFLINE)
         if (prefs.role() == BlePrefs.Role.PHONE) {
             prefs.setDirectLampRuntimeState(mac, BlePrefs.RuntimeLinkState.OFFLINE)
+            if (prefs.forceDirect || prefs.hubRuntimeState != BlePrefs.RuntimeLinkState.CONNECTED) {
+                prefs.setLampRuntimeState(mac, BlePrefs.RuntimeLinkState.OFFLINE)
+            }
             reconcilePhoneLifetime()
+        } else {
+            prefs.setLampRuntimeState(mac, BlePrefs.RuntimeLinkState.OFFLINE)
         }
         QStarWidgetProvider.refresh(this)
         event(EVENT_ERROR, mac, connections[mac]?.name, message)
@@ -952,10 +964,14 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
     }
 
     override fun onDisconnected(mac: String, status: Int) {
-        prefs.setLampRuntimeState(mac, BlePrefs.RuntimeLinkState.OFFLINE)
         if (prefs.role() == BlePrefs.Role.PHONE) {
             prefs.setDirectLampRuntimeState(mac, BlePrefs.RuntimeLinkState.OFFLINE)
+            if (prefs.forceDirect || prefs.hubRuntimeState != BlePrefs.RuntimeLinkState.CONNECTED) {
+                prefs.setLampRuntimeState(mac, BlePrefs.RuntimeLinkState.OFFLINE)
+            }
             reconcilePhoneLifetime()
+        } else {
+            prefs.setLampRuntimeState(mac, BlePrefs.RuntimeLinkState.OFFLINE)
         }
         QStarWidgetProvider.refresh(this)
         event(EVENT_DISCONNECTED, mac, connections[mac]?.name, "status=$status")
