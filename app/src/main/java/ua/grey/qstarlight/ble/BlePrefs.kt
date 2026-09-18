@@ -196,17 +196,30 @@ class BlePrefs(private val context: Context) {
         prefs.edit().putString(KEY_RUNTIME_LAMP_PREFIX + mac.uppercase(), state.name).apply()
     }
 
+    fun directLampRuntimeState(mac: String): RuntimeLinkState = runCatching {
+        RuntimeLinkState.valueOf(
+            prefs.getString(KEY_RUNTIME_DIRECT_LAMP_PREFIX + mac.uppercase(), RuntimeLinkState.OFFLINE.name)!!
+        )
+    }.getOrDefault(RuntimeLinkState.OFFLINE)
+
+    fun setDirectLampRuntimeState(mac: String, state: RuntimeLinkState) {
+        prefs.edit().putString(KEY_RUNTIME_DIRECT_LAMP_PREFIX + mac.uppercase(), state.name).apply()
+    }
+
     fun resetRuntimeLinkStates() {
         val e = prefs.edit().putString(KEY_RUNTIME_HUB_STATE, RuntimeLinkState.OFFLINE.name)
-        devices().forEach { e.putString(KEY_RUNTIME_LAMP_PREFIX + it.mac.uppercase(), RuntimeLinkState.OFFLINE.name) }
+        devices().forEach {
+            e.putString(KEY_RUNTIME_LAMP_PREFIX + it.mac.uppercase(), RuntimeLinkState.OFFLINE.name)
+            e.putString(KEY_RUNTIME_DIRECT_LAMP_PREFIX + it.mac.uppercase(), RuntimeLinkState.OFFLINE.name)
+        }
         e.apply()
     }
 
-    fun anyLampConnected(): Boolean =
-        devices().any { lampRuntimeState(it.mac) == RuntimeLinkState.CONNECTED }
+    fun anyDirectLampConnected(): Boolean =
+        devices().any { directLampRuntimeState(it.mac) == RuntimeLinkState.CONNECTED }
 
     fun anyPhoneLinkConnected(): Boolean =
-        hubRuntimeState == RuntimeLinkState.CONNECTED || anyLampConnected()
+        hubRuntimeState == RuntimeLinkState.CONNECTED || anyDirectLampConnected()
 
     val phoneOfflineGraceUntil: Long
         get() = prefs.getLong(KEY_PHONE_OFFLINE_GRACE_UNTIL, 0L)
@@ -407,6 +420,7 @@ class BlePrefs(private val context: Context) {
         private const val KEY_PHONE_OFFLINE_GRACE_UNTIL = "phone_offline_grace_until"
         private const val KEY_RUNTIME_HUB_STATE = "runtime_hub_state"
         private const val KEY_RUNTIME_LAMP_PREFIX = "runtime_lamp_"
+        private const val KEY_RUNTIME_DIRECT_LAMP_PREFIX = "runtime_direct_lamp_"
 
         const val RIGHT_NAME = "QStar~D35D"
         const val LEFT_NAME = "QStar~F072"
