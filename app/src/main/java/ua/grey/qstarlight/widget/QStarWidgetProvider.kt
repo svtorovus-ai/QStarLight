@@ -53,6 +53,10 @@ class QStarWidgetProvider : AppWidgetProvider() {
                 right?.let { prefs.lampRuntimeState(it.mac) } ?: BlePrefs.RuntimeLinkState.OFFLINE
             )
 
+            views.setOnClickPendingIntent(R.id.widgetHubLink, connectIntent(context, 60))
+            left?.let { views.setOnClickPendingIntent(R.id.widgetLeftLink, connectDeviceIntent(context, it.mac, 61)) }
+            right?.let { views.setOnClickPendingIntent(R.id.widgetRightLink, connectDeviceIntent(context, it.mac, 62)) }
+
             views.setOnClickPendingIntent(R.id.widgetYellow, presetIntent(context, 0, 2))
             views.setOnClickPendingIntent(R.id.widgetWarm, presetIntent(context, 50, 3))
             views.setOnClickPendingIntent(R.id.widgetWhite, presetIntent(context, 100, 4))
@@ -96,6 +100,23 @@ class QStarWidgetProvider : AppWidgetProvider() {
             7999,
             Intent(context, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+    private fun connectIntent(context: Context, request: Int): PendingIntent =
+        pending(
+            context,
+            request,
+            Intent(context, ControlActionReceiver::class.java)
+                .setAction(ControlActionReceiver.ACTION_CONNECT)
+        )
+
+    private fun connectDeviceIntent(context: Context, mac: String, request: Int): PendingIntent =
+        pending(
+            context,
+            request,
+            Intent(context, ControlActionReceiver::class.java)
+                .setAction(ControlActionReceiver.ACTION_CONNECT_DEVICE)
+                .putExtra(ControlActionReceiver.EXTRA_MAC, mac)
         )
 
     private fun presetIntent(context: Context, white: Int, request: Int): PendingIntent {
