@@ -10,6 +10,7 @@ import android.content.Intent
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
@@ -38,6 +39,10 @@ import java.net.NetworkInterface
 import java.net.Socket
 import java.net.SocketTimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.Executors
+import ua.grey.qstarlight.diagnostics.DiagnosticLog
+import ua.grey.qstarlight.sync.ConfigVersion
+import ua.grey.qstarlight.sync.ConfigSyncStatus
 import kotlin.concurrent.thread
 
 class RemoteLinkService : Service() {
@@ -46,13 +51,17 @@ class RemoteLinkService : Service() {
     private val handler = Handler(Looper.getMainLooper())
     @Volatile private var socket: Socket? = null
     @Volatile private var writer: PrintWriter? = null
+    @Volatile private var hubProtocol = 2
     @Volatile private var currentHost: String = ""
     private val sendLock = Any()
+    private val sender = Executors.newSingleThreadExecutor()
     @Volatile private var updateInProgress = false
     private var lastAutoPushedVersion = -1L
-    @Volatile private var pendingConfigRevision: Long? = null
+    private var pendingConfigVersion: ConfigVersion? = null
+    private var configSentAt = 0L
+    private var configAttempts = 0
+    private val configRetry = Runnable { sendPendingConfig() }
     @Volatile private var pendingConfigJson: JSONObject? = null
-    @Volatile private var configRetryScheduled = false
     @Volatile private var autoLampWake = false
     @Volatile private var pendingConnectMissing = false
     private var sessionStopRunnable: Runnable? = null
@@ -123,11 +132,11 @@ class RemoteLinkService : Service() {
         prefs.hubRuntimeState = BlePrefs.RuntimeLinkState.OFFLINE
         QStarWidgetProvider.refresh(this)
         hubVersionCode = -1L
-        pendingConfigRevision = null
+        pendingConfigVersion = null
         pendingConfigJson = null
-        configRetryScheduled = false
         sessionStopRunnable = null
         handler.removeCallbacksAndMessages(null)
+        sender.shutdownNow()
         super.onDestroy()
     }
 
@@ -167,6 +176,7 @@ class RemoteLinkService : Service() {
                 val input = BufferedReader(InputStreamReader(s.getInputStream()))
                 val hello = JSONObject()
                     .put("type", "hello")
+                    .put("protocol", 3)
                     .put("pin", prefs.remotePin)
                     .put("client", android.os.Build.MODEL ?: "Android")
                     .put("versionCode", UpdateManager.versionCode(this))
@@ -185,6 +195,7 @@ class RemoteLinkService : Service() {
                 }
 
                 currentHost = host
+                hubProtocol = helloJson.optInt("protocol", 2)
                 prefs.lastHubHost = host
                 hubVersionCode = helloJson.optLong("versionCode", -1L)
                 setConnected(true, "Магнітола online", host)
@@ -212,15 +223,19 @@ class RemoteLinkService : Service() {
                     handler.postDelayed({ pushSelfUpdate(manual = false) }, 1400)
                 }
 
+                var lastReplyAt = SystemClock.elapsedRealtime()
                 while (running.get() && !s.isClosed) {
                     try {
                         val line = input.readLine() ?: break
-                        handleIncoming(line, host)
+                        lastReplyAt = SystemClock.elapsedRealtime()
+                        handler.post { if (socket === s && running.get()) handleIncoming(line, host) }
                     } catch (_: SocketTimeoutException) {
+                        if (SystemClock.elapsedRealtime() - lastReplyAt >= 15_000) throw SocketTimeoutException("HUB did not reply for 15 seconds")
                         sendSimple("ping")
                     }
                 }
             } catch (t: Throwable) {
+                DiagnosticLog.write("LINK", "Connection failed: ${t.javaClass.simpleName}: ${t.message}", "ERROR")
                 setConnected(false, "Зв'язок: ${t.javaClass.simpleName}", host)
             } finally {
                 closeSocket()
@@ -296,33 +311,39 @@ class RemoteLinkService : Service() {
     }
 
     private fun handleIncoming(line: String, host: String) {
+        DiagnosticLog.write("LINK RX", "host=$host $line")
         try {
             val json = JSONObject(line)
             when (json.optString("type")) {
                 "pong" -> Unit
                 "status" -> {
+                    val version = ConfigVersion(json.optLong("configRevision", 0L), json.optString("configOrigin", ""))
+                    if (pendingConfigJson == null && version >= prefs.configVersion) {
+                        prefs.power = json.optBoolean("power", prefs.power)
+                        prefs.white = json.optInt("white", prefs.white)
+                        prefs.brightness = json.optInt("brightness", prefs.brightness)
+                        QStarWidgetProvider.refresh(this)
+                    }
                     hubVersionCode = json.optLong("versionCode", hubVersionCode)
                     broadcast(EVENT_HUB_STATUS, json.optString("text", "status"), host, line)
                 }
                 "config_ack" -> {
-                    val revision = json.optLong("revision", -1L)
-                    if (pendingConfigRevision == revision) {
-                        pendingConfigRevision = null
+                    val legacyOrigin = if (hubProtocol < 3) pendingConfigVersion?.origin.orEmpty() else ""
+                    val ack = ConfigVersion(json.optLong("revision", -1L), json.optString("origin", legacyOrigin))
+                    val accepted = json.optBoolean("accepted", hubProtocol < 3)
+                    if (ack.acknowledges(pendingConfigVersion, prefs.configVersion, accepted)) {
+                        val elapsed = SystemClock.elapsedRealtime() - configSentAt
+                        pendingConfigVersion = null
                         pendingConfigJson = null
-                        configRetryScheduled = false
-                        broadcast(EVENT_CONFIG_SYNC, "Налаштування підтверджено магнітолою", host, line)
-                    }
-                }
-                "config_sync" -> {
-                    val config = json.optJSONObject("config")
-                    if (pendingConfigRevision != null) {
-                        broadcast(EVENT_CONFIG_SYNC, "Очікую підтвердження налаштувань телефона", host, line)
-                    } else if (config != null && prefs.applySyncConfig(config)) {
-                        broadcast(EVENT_CONFIG_SYNC, "Налаштування отримано з магнітоли", host, line)
+                        handler.removeCallbacks(configRetry)
+                        ConfigSyncStatus.confirmed(ack, "магнітолою за $elapsed мс")
+                        broadcast(EVENT_CONFIG_SYNC, "Налаштування підтверджено магнітолою", host)
                     } else {
-                        broadcast(EVENT_CONFIG_SYNC, "Налаштування синхронні", host, line)
+                        DiagnosticLog.write("SYNC", "Ignored obsolete/rejected ACK rev=${ack.revision} accepted=$accepted; local=${prefs.configVersion.revision}")
                     }
+                    json.optJSONObject("config")?.let { receiveHubConfig(it, host) }
                 }
+                "config_sync" -> json.optJSONObject("config")?.let { receiveHubConfig(it, host) }
                 "ble" -> {
                     val mac = json.optString("mac")
                     val event = json.optString("event")
@@ -347,8 +368,8 @@ class RemoteLinkService : Service() {
                 "ack" -> broadcast(EVENT_ACK, json.optString("message", "OK"), host, line)
                 else -> broadcast(EVENT_MESSAGE, line, host, line)
             }
-        } catch (_: Throwable) {
-            broadcast(EVENT_MESSAGE, line, host, line)
+        } catch (t: Throwable) {
+            DiagnosticLog.write("LINK RX", "Invalid message: ${t.javaClass.simpleName}: ${t.message}", "ERROR")
         }
     }
 
@@ -430,24 +451,61 @@ class RemoteLinkService : Service() {
         QStarBleService.start(this, Intent().setAction(QStarBleService.ACTION_CONNECT))
     }
 
+    private fun receiveHubConfig(config: JSONObject, host: String) {
+        if (hubProtocol < 3 && config.optLong("revision") == prefs.configRevision) config.put("origin", prefs.configVersion.origin)
+        val version = ConfigVersion(config.optLong("revision", 0L), config.optString("origin", ""))
+        if (version.revision <= 0L) return
+        val changed = prefs.applySyncConfig(config)
+        val local = prefs.configVersion
+        val accepted = version == local
+        sendLine(JSONObject().put("type", "config_ack")
+            .put("revision", version.revision).put("origin", version.origin)
+            .put("accepted", accepted))
+        if (accepted) {
+            pendingConfigVersion = null
+            pendingConfigJson = null
+            handler.removeCallbacks(configRetry)
+            // Receiving the exact version from HUB also proves its settings match.
+            ConfigSyncStatus.confirmed(local, if (changed) "• отримано з магнітоли" else "магнітолою")
+            QStarWidgetProvider.refresh(this)
+            broadcast(EVENT_CONFIG_SYNC, "Налаштування узгоджено з магнітолою", host)
+        } else if (pendingConfigVersion != local) {
+            sendConfigNow()
+        }
+    }
+
     private fun sendConfigNow() {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            handler.post { sendConfigNow() }
+            return
+        }
         val config = prefs.syncConfigJson()
-        pendingConfigRevision = config.optLong("revision", prefs.configRevision)
+        val version = ConfigVersion(config.optLong("revision"), config.optString("origin", ""))
+        if (version != pendingConfigVersion) {
+            configSentAt = SystemClock.elapsedRealtime()
+            configAttempts = 0
+        }
+        pendingConfigVersion = version
         pendingConfigJson = config
+        ConfigSyncStatus.waiting(if (connected) "Передаю налаштування • очікую підтвердження HUB" else "HUB недоступний • передам після підключення")
         sendPendingConfig()
     }
 
     private fun sendPendingConfig() {
+        if (!running.get()) return
+        handler.removeCallbacks(configRetry)
         val config = pendingConfigJson ?: return
-        if (connected && writer != null) {
-            sendLine(JSONObject().put("type", "config_sync").put("config", config))
+        if (pendingConfigVersion != prefs.configVersion) {
+            sendConfigNow()
+            return
         }
-        if (configRetryScheduled) return
-        configRetryScheduled = true
-        handler.postDelayed({
-            configRetryScheduled = false
-            if (pendingConfigJson != null) sendPendingConfig()
-        }, 1400)
+        if (connected && writer != null) {
+            configAttempts++
+            DiagnosticLog.write("SYNC TX", "rev=${pendingConfigVersion?.revision} attempt=$configAttempts host=$currentHost")
+            sendLine(JSONObject().put("type", "config_sync").put("config", config))
+            if (configAttempts > 1) ConfigSyncStatus.waiting("Немає підтвердження HUB • повтор $configAttempts")
+        }
+        handler.postDelayed(configRetry, 1400)
     }
 
     private fun pushSelfUpdate(manual: Boolean) {
@@ -534,20 +592,28 @@ class RemoteLinkService : Service() {
         sendLine(JSONObject().put("type", type))
     }
 
-    private fun sendLine(json: JSONObject): Boolean {
-        return synchronized(sendLock) {
-            val out = writer ?: return@synchronized false
-            return@synchronized try {
-                out.println(json.toString())
-                !out.checkError()
-            } catch (_: Throwable) { false }
+    private fun sendLine(json: JSONObject) {
+        val out = writer ?: return
+        val payload = json.toString()
+        if (sender.isShutdown) return
+        sender.execute {
+            // Never deliver queued packets to a different connection after reconnecting.
+            if (writer !== out) return@execute
+            try {
+                out.println(payload)
+                if (out.checkError()) throw IllegalStateException("socket write failed")
+                DiagnosticLog.write("LINK TX", "host=$currentHost $payload")
+            } catch (t: Throwable) {
+                DiagnosticLog.write("LINK TX", "${t.javaClass.simpleName}: ${t.message}", "ERROR")
+                closeSocket()
+            }
         }
     }
 
     private fun closeSocket() {
         synchronized(sendLock) {
-            try { writer?.close() } catch (_: Throwable) { }
             writer = null
+            // Closing the socket unblocks both reader and writer without flushing on the UI thread.
             try { socket?.close() } catch (_: Throwable) { }
             socket = null
         }
@@ -595,6 +661,7 @@ class RemoteLinkService : Service() {
 
     private fun setConnected(value: Boolean, message: String, host: String? = null) {
         connected = value
+        if (!value) ConfigSyncStatus.waiting("HUB недоступний • синхронізацію не підтверджено")
         prefs.hubRuntimeState =
             if (value) BlePrefs.RuntimeLinkState.CONNECTED else BlePrefs.RuntimeLinkState.OFFLINE
         if (value) {
@@ -614,6 +681,7 @@ class RemoteLinkService : Service() {
     }
 
     private fun broadcast(type: String, message: String, host: String? = null, raw: String? = null) {
+        DiagnosticLog.write("LINK", "event=$type host=${host.orEmpty()} $message", if (type == EVENT_ERROR) "ERROR" else "INFO")
         val i = Intent(ACTION_EVENT).setPackage(packageName)
             .putExtra(EXTRA_EVENT, type)
             .putExtra(EXTRA_MESSAGE, message)

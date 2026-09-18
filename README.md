@@ -1,6 +1,6 @@
 # QStar Light
 
-Current development version: **0.3.3**.
+Current development version: **0.5.7**.
 
 Native Android app for two QStar/YOBIS PZ-05 BLE headlight controllers.
 
@@ -50,3 +50,13 @@ This archive does not contain a Gradle wrapper binary or Android SDK. Android St
 
 ## Hardware limit
 Software can improve reconnect/retry behavior but cannot repair genuinely weak RF. The boot fade can only start after Android has booted and BLE has connected to the controllers. It cannot animate before the head unit/phone is alive.
+
+## Settings synchronization and diagnostics (0.5.7)
+
+- Install 0.5.7 on both devices for acknowledged, bidirectional settings synchronization.
+- While connected, setting sliders publish the latest value every 120 ms and flush on release. This is the UI send interval, not a guaranteed network latency. Missing acknowledgements are retried after 1.4 seconds; offline settings reconcile after reconnecting.
+- Revisions are monotonic per device; a stable origin ID resolves equal-revision conflicts. Older snapshots and acknowledgements cannot mark newer edits synchronized. Concurrent offline edits resolve by the ordered revision/origin pair; keep device clocks accurate.
+- Shared configuration: lamp power, color, brightness, startup/fade profile, strobe profile, selected lamps and their BLE passwords. Role, pairing PIN, host, autostart, connection policy and installer options remain device-local.
+- **Синхронізувати зараз** re-exchanges the saved settings. **Перевірити оновлення додатка зараз** checks GitHub immediately when a network is available; Android's installer confirmation still applies.
+- The third **Діагностика** tab shows timestamped service, transport, command, sync and updater events. Events are collected while the UI is closed. The on-device rotating journal is capped at two 512 KiB files, with up to 2,000 recent events available to copy/export as UTF-8 TXT; the screen shows the last 300. Large clipboard copies are shortened with an explicit notice; TXT export retains all 2,000 entries. PINs and BLE passwords are redacted.
+- Automated checks: `gradle :app:testDebugUnitTest :app:assembleDebug`. Robolectric tests cover settings reconciliation, preserved local options, third-tab navigation and slider gesture exclusion. Real phone/head-unit transport latency and BLE operation still require a connected-device check.

@@ -2,6 +2,14 @@ package ua.grey.qstarlight
 
 import android.Manifest
 import android.app.AlertDialog
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.graphics.Rect
+import androidx.activity.result.contract.ActivityResultContracts
+import kotlin.concurrent.thread
+import java.util.concurrent.atomic.AtomicBoolean
+import ua.grey.qstarlight.diagnostics.DiagnosticLog
+import ua.grey.qstarlight.sync.ConfigSyncStatus
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -62,6 +70,10 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var controlPage: ScrollView
     private lateinit var settingsPage: ScrollView
+    private lateinit var diagnosticsPage: ScrollView
+    private lateinit var tabDiagnostics: Button
+    private lateinit var tvDiagnosticsInfo: TextView
+    private lateinit var tvLogCount: TextView
     private lateinit var pageContainer: View
     private lateinit var tabControl: Button
     private lateinit var tabSettings: Button
@@ -128,7 +140,38 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnPushUpdate: Button
     private lateinit var btnInstallPermission: Button
 
-    private var showingSettings = false
+    private var currentPage = 0
+    private var swipeTargetPage = 0
+    private var pageFinish: Runnable? = null
+    @Volatile private var activityStarted = false
+    private val logRefreshScheduled = AtomicBoolean(false)
+    private var pendingLogExport: String? = null
+    private val logRefresh = Runnable {
+        logRefreshScheduled.set(false)
+        updateSyncStatus()
+        UpdateScheduler.lastStatus?.let { tvUpdateStatus.text = it }
+        if (currentPage == 2) renderDiagnostics()
+    }
+    private val logListener: () -> Unit = {
+        if (activityStarted && logRefreshScheduled.compareAndSet(false, true)) handler.postDelayed(logRefresh, 150)
+    }
+    private val exportLog = registerForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
+        if (uri != null) {
+            val report = pendingLogExport ?: DiagnosticLog.report(this)
+            thread(name = "QStarLogExport") {
+                val result = runCatching {
+                    val output = contentResolver.openOutputStream(uri) ?: error("Не вдалося відкрити файл")
+                    output.bufferedWriter(Charsets.UTF_8).use { it.write(report) }
+                }
+                handler.post {
+                    val message = if (result.isSuccess) "Журнал збережено" else "Помилка експорту: ${result.exceptionOrNull()?.message}"
+                    Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+                    DiagnosticLog.write("EXPORT", message, if (result.isSuccess) "INFO" else "ERROR")
+                }
+            }
+        }
+        pendingLogExport = null
+    }
     private var swipeDownX = 0f
     private var swipeDownY = 0f
     private var pageSwipeActive = false
@@ -162,12 +205,17 @@ class MainActivity : AppCompatActivity() {
         bindViews()
         configureUi()
         bindActions()
+        showPage(savedInstanceState?.getInt("page", 0) ?: 0)
         ensurePermissions()
     }
 
     private fun bindViews() {
         controlPage = findViewById(R.id.controlPage)
         settingsPage = findViewById(R.id.settingsPage)
+        diagnosticsPage = findViewById(R.id.diagnosticsPage)
+        tabDiagnostics = findViewById(R.id.tabDiagnostics)
+        tvDiagnosticsInfo = findViewById(R.id.tvDiagnosticsInfo)
+        tvLogCount = findViewById(R.id.tvLogCount)
         pageContainer = findViewById(R.id.pageContainer)
         tabControl = findViewById(R.id.tabControl)
         tabSettings = findViewById(R.id.tabSettings)
@@ -268,7 +316,7 @@ class MainActivity : AppCompatActivity() {
 
         refreshAllControlsFromPrefs()
         updatingUi = false
-        showPage(false)
+        showPage(0)
         updateRoleUi()
         updateLampCards()
         updateStrobeButton()
@@ -311,14 +359,44 @@ class MainActivity : AppCompatActivity() {
 
         updateLabels()
         updateSettingsLabels()
-        updateSyncStatus("Синхронізовано")
+        updateSyncStatus()
         updatingUi = old
         handler.post { controlPage.scrollTo(0, controlScrollY); settingsPage.scrollTo(0, settingsScrollY) }
     }
 
     private fun bindActions() {
-        tabControl.setOnClickListener { showPage(false) }
-        tabSettings.setOnClickListener { showPage(true) }
+        tabControl.setOnClickListener { animateToPage(0) }
+        tabSettings.setOnClickListener { animateToPage(1) }
+        tabDiagnostics.setOnClickListener { animateToPage(2) }
+        findViewById<Button>(R.id.btnSyncNow).setOnClickListener {
+            pendingConfigSync?.let(handler::removeCallbacks)
+            pendingConfigSync = null
+            pendingSliderSend?.let(handler::removeCallbacks)
+            pendingSliderSend = null
+            DiagnosticLog.write("UI", "Manual settings synchronization requested")
+            ConfigSyncStatus.waiting("Примусова синхронізація • очікую інший пристрій")
+            ControlDispatcher.configChanged(this)
+            updateSyncStatus()
+        }
+        findViewById<Button>(R.id.btnCheckUpdate).setOnClickListener {
+            UpdateScheduler.checkNow(this)
+            tvUpdateStatus.text = UpdateScheduler.lastStatus
+        }
+        findViewById<Button>(R.id.btnCopyLogs).setOnClickListener {
+            val report = DiagnosticLog.report(this)
+            val clipboard = getSystemService(ClipboardManager::class.java)
+            // Binder caps clipboard payloads; a larger journal is always available as a TXT export.
+            val text = if (report.toByteArray(Charsets.UTF_8).size <= 450_000) report else
+                "Журнал скорочено для буфера; повна версія — Експорт .txt.\n" + report.takeLast(100_000)
+            clipboard.setPrimaryClip(ClipData.newPlainText("QSTAR LIGHT diagnostics", text))
+            Toast.makeText(this, "Журнал скопійовано", Toast.LENGTH_SHORT).show()
+        }
+        findViewById<Button>(R.id.btnExportLogs).setOnClickListener {
+            pendingLogExport = DiagnosticLog.report(this)
+            val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
+            runCatching { exportLog.launch("QStarLight-${prefs.role().name}-$stamp.txt") }
+                .onFailure { pendingLogExport = null; Toast.makeText(this, "Немає системного вибору файлів: ${it.message}", Toast.LENGTH_LONG).show() }
+        }
 
         findViewById<Button>(R.id.btnReconnect).setOnClickListener {
             if (ensurePermissions()) {
@@ -360,8 +438,7 @@ class MainActivity : AppCompatActivity() {
         val mainSeekListener = object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 if (!fromUser) return
-                prefs.white = seekTemp.progress
-                prefs.brightness = seekBrightness.progress
+                prefs.updateLight(white = seekTemp.progress, brightness = seekBrightness.progress)
                 updateLabels()
                 scheduleSliderSend()
             }
@@ -479,7 +556,7 @@ class MainActivity : AppCompatActivity() {
             }
             override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
             override fun onStopTrackingTouch(seekBar: SeekBar?) {
-                if (!updatingUi) scheduleConfigSync(80)
+                if (!updatingUi) scheduleConfigSync(0)
             }
         })
     }
@@ -512,6 +589,9 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
+        activityStarted = true
+        DiagnosticLog.addListener(logListener)
+        handler.post(logRefresh)
         ContextCompat.registerReceiver(
             this, receiver, IntentFilter(QStarBleService.ACTION_EVENT), ContextCompat.RECEIVER_NOT_EXPORTED
         )
@@ -525,28 +605,53 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onStop() {
+        if (pageFinish != null || pageSwipeActive) showPage(currentPage)
+        activityStarted = false
+        DiagnosticLog.removeListener(logListener)
+        handler.removeCallbacks(logRefresh)
+        logRefreshScheduled.set(false)
+        // Flush the final value even when the user leaves before the UI throttle fires.
+        pendingConfigSync?.let { handler.removeCallbacks(it); pendingConfigSync = null; it.run() }
         super.onStop()
         try { unregisterReceiver(receiver) } catch (_: Throwable) { }
         try { unregisterReceiver(remoteReceiver) } catch (_: Throwable) { }
     }
 
-    private fun showPage(settings: Boolean) {
-        showingSettings = settings
-        controlPage.visibility = if (settings) View.GONE else View.VISIBLE
-        settingsPage.visibility = if (settings) View.VISIBLE else View.GONE
-        controlPage.translationX = 0f
-        settingsPage.translationX = 0f
-        controlPage.alpha = 1f
-        settingsPage.alpha = 1f
-        tabControl.isSelected = !settings
-        tabSettings.isSelected = settings
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putInt("page", currentPage)
+        super.onSaveInstanceState(outState)
+    }
+
+    private fun pages() = listOf(controlPage, settingsPage, diagnosticsPage)
+
+    private fun showPage(index: Int) {
+        pageFinish?.let(handler::removeCallbacks)
+        pageFinish = null
+        pageSwipeActive = false
+        currentPage = index.coerceIn(0, 2)
+        pages().forEachIndexed { page, view ->
+            view.animate().cancel()
+            view.visibility = if (page == currentPage) View.VISIBLE else View.GONE
+            view.translationX = 0f
+            view.alpha = 1f
+        }
+        listOf(tabControl, tabSettings, tabDiagnostics).forEachIndexed { page, tab -> tab.isSelected = page == currentPage }
+        if (currentPage == 2) renderDiagnostics()
+    }
+
+    private fun animateToPage(index: Int) {
+        if (index == currentPage) { showPage(index); return }
+        showPage(currentPage)
+        swipeTargetPage = index
+        updatePageSwipe(0f)
+        finishPageSwipe(true)
     }
 
     private fun applySystemBarInsets() {
         val root = findViewById<View>(R.id.rootLayout)
-        val initialStart = root.paddingStart
+        val initialStart = root.paddingLeft
         val initialTop = root.paddingTop
-        val initialEnd = root.paddingEnd
+        val initialEnd = root.paddingRight
         val initialBottom = root.paddingBottom
         ViewCompat.setOnApplyWindowInsetsListener(root) { view, windowInsets ->
             val bars = windowInsets.getInsets(
@@ -554,7 +659,7 @@ class MainActivity : AppCompatActivity() {
                     WindowInsetsCompat.Type.navigationBars() or
                     WindowInsetsCompat.Type.displayCutout()
             )
-            view.setPaddingRelative(
+            view.setPadding(
                 initialStart + bars.left,
                 initialTop + bars.top,
                 initialEnd + bars.right,
@@ -568,6 +673,7 @@ class MainActivity : AppCompatActivity() {
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                if (pageFinish != null) showPage(currentPage)
                 swipeDownX = event.rawX
                 swipeDownY = event.rawY
                 pageSwipeActive = false
@@ -576,38 +682,38 @@ class MainActivity : AppCompatActivity() {
                 velocityTracker?.recycle()
                 velocityTracker = VelocityTracker.obtain().also { it.addMovement(event) }
             }
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                pageSwipeBlocked = true
+                if (pageSwipeActive) { finishPageSwipe(false); return true }
+            }
             MotionEvent.ACTION_MOVE -> {
                 velocityTracker?.addMovement(event)
                 if (!pageSwipeBlocked) {
                     val dx = event.rawX - swipeDownX
                     val dy = event.rawY - swipeDownY
-                    if (!pageSwipeActive && kotlin.math.abs(dx) > pageSwipeSlop &&
-                        kotlin.math.abs(dx) > kotlin.math.abs(dy) * 1.25f
-                    ) {
-                        val allowedDirection = (dx < 0 && !showingSettings) || (dx > 0 && showingSettings)
-                        if (allowedDirection) {
+                    if (!pageSwipeActive && kotlin.math.abs(dy) > pageSwipeSlop && kotlin.math.abs(dy) >= kotlin.math.abs(dx)) {
+                        pageSwipeBlocked = true
+                    } else if (!pageSwipeActive && kotlin.math.abs(dx) > pageSwipeSlop && kotlin.math.abs(dx) > kotlin.math.abs(dy) * 1.25f) {
+                        swipeTargetPage = currentPage + if (dx < 0) 1 else -1
+                        if (swipeTargetPage in 0..2) {
                             pageSwipeActive = true
                             val cancel = MotionEvent.obtain(event).apply { action = MotionEvent.ACTION_CANCEL }
                             super.dispatchTouchEvent(cancel)
                             cancel.recycle()
-                        } else {
-                            pageSwipeBlocked = true
-                        }
+                        } else pageSwipeBlocked = true
                     }
-                    if (pageSwipeActive) {
-                        updatePageSwipe(dx)
-                        return true
-                    }
+                    if (pageSwipeActive) { updatePageSwipe(dx); return true }
                 }
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 velocityTracker?.addMovement(event)
                 if (pageSwipeActive) {
-                    val dx = event.rawX - swipeDownX
+                    val direction = if (swipeTargetPage > currentPage) -1f else 1f
+                    val dx = (event.rawX - swipeDownX) * direction
                     velocityTracker?.computeCurrentVelocity(1000)
-                    val velocityX = velocityTracker?.xVelocity ?: 0f
+                    val velocity = (velocityTracker?.xVelocity ?: 0f) * direction
                     val complete = event.actionMasked == MotionEvent.ACTION_UP &&
-                        (kotlin.math.abs(dx) >= pageSwipeMinDistance || kotlin.math.abs(velocityX) >= 700f)
+                        (dx >= pageSwipeMinDistance || (dx > pageSwipeSlop && velocity >= 700f * resources.displayMetrics.density))
                     finishPageSwipe(complete)
                     velocityTracker?.recycle()
                     velocityTracker = null
@@ -622,37 +728,28 @@ class MainActivity : AppCompatActivity() {
 
     private fun updatePageSwipe(dx: Float) {
         val width = pageContainer.width.toFloat().coerceAtLeast(1f)
-        val current = if (showingSettings) settingsPage else controlPage
-        val incoming = if (showingSettings) controlPage else settingsPage
-        val direction = if (showingSettings) -1f else 1f
+        val direction = if (swipeTargetPage > currentPage) 1f else -1f
+        val offset = if (direction > 0) dx.coerceIn(-width, 0f) else dx.coerceIn(0f, width)
+        val current = pages()[currentPage]
+        val incoming = pages()[swipeTargetPage]
         incoming.visibility = View.VISIBLE
-        current.translationX = dx
-        incoming.translationX = dx + direction * width
-        val progress = (kotlin.math.abs(dx) / width).coerceIn(0f, 1f)
-        current.alpha = 1f - progress * 0.25f
-        incoming.alpha = 0.75f + progress * 0.25f
+        current.translationX = offset
+        incoming.translationX = offset + direction * width
     }
 
     private fun finishPageSwipe(complete: Boolean) {
-        val targetSettings = if (complete) !showingSettings else showingSettings
+        pageSwipeActive = false
+        val target = if (complete) swipeTargetPage else currentPage
         val width = pageContainer.width.toFloat().coerceAtLeast(1f)
-        val current = if (showingSettings) settingsPage else controlPage
-        val incoming = if (showingSettings) controlPage else settingsPage
-        val currentTarget = if (complete) {
-            if (showingSettings) width else -width
-        } else 0f
-        val incomingTarget = if (complete) 0f else {
-            if (showingSettings) -width else width
+        val direction = if (swipeTargetPage > currentPage) 1f else -1f
+        listOf(
+            pages()[currentPage] to if (complete) -direction * width else 0f,
+            pages()[swipeTargetPage] to if (complete) 0f else direction * width
+        ).forEach { (view, offset) ->
+            view.animate().translationX(offset).setDuration(180L)
+                .setInterpolator(AccelerateDecelerateInterpolator()).start()
         }
-        listOf(current to currentTarget, incoming to incomingTarget).forEach { (view, target) ->
-            view.animate()
-                .translationX(target)
-                .alpha(if (complete && view === current) 0.75f else 1f)
-                .setDuration(180L)
-                .setInterpolator(AccelerateDecelerateInterpolator())
-                .start()
-        }
-        handler.postDelayed({ showPage(targetSettings) }, 180L)
+        pageFinish = Runnable { showPage(target) }.also { handler.postDelayed(it, 180L) }
     }
 
     private fun allSeekBars(): List<SeekBar> = listOf(
@@ -663,10 +760,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun isInsideView(rawX: Float, rawY: Float, view: View): Boolean {
         if (!view.isShown) return false
-        val location = IntArray(2)
-        view.getLocationOnScreen(location)
-        return rawX >= location[0] && rawX < location[0] + view.width &&
-            rawY >= location[1] && rawY < location[1] + view.height
+        val bounds = Rect()
+        return view.getGlobalVisibleRect(bounds) && bounds.contains(rawX.toInt(), rawY.toInt())
     }
 
     private fun changeRole(role: BlePrefs.Role) {
@@ -719,7 +814,7 @@ class MainActivity : AppCompatActivity() {
             setHubStatus(UiLinkState.OFFLINE, "Магнітола • немає з'єднання")
         }
 
-        tvUpdateStatus.text = if (hub) {
+        tvUpdateStatus.text = UpdateScheduler.lastStatus ?: if (hub) {
             if (prefs.silentRootInstall) "HUB готовий приймати APK • root install увімкнено" else "HUB готовий приймати APK з телефона"
         } else {
             val hubVersion = RemoteLinkService.hubVersionCode
@@ -735,30 +830,32 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun scheduleSliderSend() {
-        pendingSliderSend?.let(handler::removeCallbacks)
-        val task = Runnable { sendCurrentCct() }
+        if (pendingSliderSend != null) return
+        val task = Runnable { pendingSliderSend = null; sendCurrentCct() }
         pendingSliderSend = task
         handler.postDelayed(task, 120)
     }
 
     private fun sendCurrentCct() {
+        pendingSliderSend?.let(handler::removeCallbacks)
+        pendingSliderSend = null
         if (!ensurePermissions(false) && prefs.forceDirect) return
         ControlDispatcher.apply(this, prefs.white, prefs.brightness)
     }
 
-    private fun scheduleConfigSync(delayMs: Long = 350L) {
-        updateSyncStatus("Зміни очікують синхронізації…")
+    private fun scheduleConfigSync(delayMs: Long = 120L) {
+        ConfigSyncStatus.waiting("Є зміни • передаю іншому пристрою")
+        updateSyncStatus()
+        if (pendingConfigSync != null && delayMs > 0) return
         pendingConfigSync?.let(handler::removeCallbacks)
-        val task = Runnable {
+        pendingConfigSync = Runnable {
+            pendingConfigSync = null
             ControlDispatcher.configChanged(this)
-            updateSyncStatus("Відправлено • очікую HUB")
-        }
-        pendingConfigSync = task
-        handler.postDelayed(task, delayMs)
+        }.also { handler.postDelayed(it, delayMs) }
     }
 
-    private fun updateSyncStatus(prefix: String) {
-        tvSyncStatus.text = "$prefix • rev ${prefs.configRevision}"
+    private fun updateSyncStatus() {
+        tvSyncStatus.text = ConfigSyncStatus.summary(prefs.configVersion)
     }
 
     private fun updateLabels() {
@@ -1020,11 +1117,11 @@ class MainActivity : AppCompatActivity() {
                 }
                 QStarBleService.EVENT_CONFIG_SYNC -> {
                     refreshAllControlsFromPrefs()
-                    updateSyncStatus("Отримано з телефона")
+                    updateSyncStatus()
                 }
                 QStarBleService.EVENT_UPDATE -> tvUpdateStatus.text = msg
             }
-            appendLog("BLE  $type  ${name ?: mac.orEmpty()}  $msg")
+
         }
     }
 
@@ -1054,10 +1151,7 @@ class MainActivity : AppCompatActivity() {
             }
             if (type == RemoteLinkService.EVENT_HUB_STATUS && raw != null) {
                 try {
-                    val json = JSONObject(raw)
-                    prefs.power = json.optBoolean("power", prefs.power)
-                    prefs.white = json.optInt("white", prefs.white).coerceIn(0, 100)
-                    prefs.brightness = json.optInt("brightness", prefs.brightness).coerceIn(5, 100)
+                    if (pendingSliderSend != null || pendingConfigSync != null) return
                     updatingUi = true
                     switchPower.isChecked = prefs.power
                     seekTemp.progress = prefs.white
@@ -1069,18 +1163,23 @@ class MainActivity : AppCompatActivity() {
             when (type) {
                 RemoteLinkService.EVENT_CONFIG_SYNC -> {
                     refreshAllControlsFromPrefs()
-                    updateSyncStatus(if (msg.contains("отримано", true)) "Отримано з HUB" else "Синхронізовано")
+                    updateSyncStatus()
                 }
                 RemoteLinkService.EVENT_UPDATE -> tvUpdateStatus.text = msg
             }
             updateRoleUi()
             if (type == RemoteLinkService.EVENT_UPDATE) tvUpdateStatus.text = msg
-            appendLog("LINK $type $host $msg")
+
         }
     }
 
-    private fun appendLog(line: String) {
-        val old = tvLog.text.toString().lines().takeLast(28)
-        tvLog.text = (old + line).filter { it.isNotBlank() }.joinToString("\n")
+    private fun renderDiagnostics() {
+        val log = DiagnosticLog.snapshot()
+        tvDiagnosticsInfo.text = "v${UpdateManager.versionName(this)} • ${Build.MODEL} • ${prefs.role()}\n" +
+            "HUB: ${prefs.hubRuntimeState} • ${ConfigSyncStatus.summary(prefs.configVersion)}"
+        tvLogCount.text = "Показано ${minOf(log.size, 300)} з ${log.size} записів. Копія та експорт містять до 2000 останніх записів і параметри пристрою."
+        tvLog.text = log.takeLast(300).joinToString("\n")
     }
+
+    private fun appendLog(line: String) = DiagnosticLog.write("UI", line)
 }

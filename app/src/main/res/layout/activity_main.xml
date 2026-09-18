@@ -411,6 +411,9 @@
                     android:padding="15dp">
                     <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="СИНХРОНІЗАЦІЯ ТА ОНОВЛЕННЯ" android:textColor="@color/muted" android:textSize="10sp" android:textStyle="bold" />
                     <TextView android:id="@+id/tvSyncStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="7dp" android:text="Налаштування синхронізуються автоматично" android:textColor="@color/text" android:textSize="13sp" />
+                    <Button android:id="@+id/btnSyncNow" android:layout_width="match_parent" android:layout_height="48dp" android:layout_marginTop="7dp" android:background="@drawable/bg_button_outline" android:text="Синхронізувати зараз" android:textAllCaps="false" android:textColor="@color/text" />
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="7dp" android:text="Спільні: колір, яскравість, профілі старту й строба та вибрані лампи. Роль, PIN, автозапуск і параметри зв’язку задаються окремо на кожному пристрої." android:textColor="@color/muted" android:textSize="11sp" />
+                    <Button android:id="@+id/btnCheckUpdate" android:layout_width="match_parent" android:layout_height="48dp" android:layout_marginTop="7dp" android:background="@drawable/bg_button_outline" android:text="Перевірити оновлення додатка зараз" android:textAllCaps="false" android:textColor="@color/text" />
                     <TextView android:id="@+id/tvUpdateStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:text="Версія HUB: невідомо" android:textColor="@color/muted" android:textSize="12sp" />
                     <Switch android:id="@+id/switchAutoPushUpdates" android:layout_width="match_parent" android:layout_height="48dp" android:text="Автоматично передавати нову версію з телефона на HUB" android:textColor="@color/text" />
                     <Switch android:id="@+id/switchSilentRootInstall" android:layout_width="match_parent" android:layout_height="48dp" android:text="Тихе встановлення через root, якщо доступний" android:textColor="@color/text" />
@@ -496,26 +499,39 @@
                     <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="7dp" android:text="Віджет: Жовтий • Теплий • Білий • ⚡ • шкала яскравості.\nAndroid 11+: QStar Light можна додати до системної панелі «Пристрої»." android:textColor="@color/text" android:textSize="12sp" />
                 </LinearLayout>
 
+
+            </LinearLayout>
+        </ScrollView>
+
+        <ScrollView
+            android:id="@+id/diagnosticsPage"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:fillViewport="true"
+            android:overScrollMode="never"
+            android:visibility="gone">
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:paddingBottom="20dp">
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="11dp"
                     android:background="@drawable/bg_card"
-                    android:elevation="5dp"
                     android:orientation="vertical"
                     android:padding="15dp">
-                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="ДІАГНОСТИКА" android:textColor="@color/muted" android:textSize="10sp" android:textStyle="bold" />
-                    <TextView
-                        android:id="@+id/tvLog"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="7dp"
-                        android:minHeight="120dp"
-                        android:text=""
-                        android:textColor="@color/log_text"
-                        android:textIsSelectable="true"
-                        android:textSize="10sp"
-                        android:typeface="monospace" />
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="ДІАГНОСТИКА" android:textColor="@color/accent" android:textSize="12sp" android:textStyle="bold" />
+                    <TextView android:id="@+id/tvDiagnosticsInfo" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:textColor="@color/text" android:textSize="12sp" />
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="48dp" android:layout_marginTop="9dp" android:orientation="horizontal">
+                        <Button android:id="@+id/btnCopyLogs" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:background="@drawable/bg_button_outline" android:text="Копіювати" android:textAllCaps="false" android:textColor="@color/text" />
+                        <Space android:layout_width="8dp" android:layout_height="1dp" />
+                        <Button android:id="@+id/btnExportLogs" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:background="@drawable/bg_button_accent" android:text="Експорт .txt" android:textAllCaps="false" android:textColor="#121212" />
+                    </LinearLayout>
+                    <TextView android:id="@+id/tvLogCount" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:textColor="@color/muted" android:textSize="11sp" />
+                    <TextView android:id="@+id/tvLog" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:minHeight="120dp" android:textColor="@color/log_text" android:textIsSelectable="true" android:textSize="10sp" android:typeface="monospace" />
                 </LinearLayout>
             </LinearLayout>
         </ScrollView>
@@ -537,7 +553,7 @@
             android:text="Світло"
             android:textAllCaps="false"
             android:textColor="@color/text"
-            android:textSize="14sp" />
+            android:textSize="12sp" android:paddingStart="2dp" android:paddingEnd="2dp" />
         <Space android:layout_width="8dp" android:layout_height="1dp" />
         <Button
             android:id="@+id/tabSettings"
@@ -548,6 +564,8 @@
             android:text="Налаштування"
             android:textAllCaps="false"
             android:textColor="@color/text"
-            android:textSize="14sp" />
+            android:textSize="12sp" android:paddingStart="2dp" android:paddingEnd="2dp" />
+        <Space android:layout_width="8dp" android:layout_height="1dp" />
+        <Button android:id="@+id/tabDiagnostics" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:background="@drawable/bg_tab_selector" android:text="Діагностика" android:textAllCaps="false" android:textColor="@color/text" android:textSize="12sp" android:paddingStart="2dp" android:paddingEnd="2dp" />
     </LinearLayout>
 </LinearLayout>

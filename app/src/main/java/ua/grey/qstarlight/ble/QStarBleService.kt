@@ -21,6 +21,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
+import ua.grey.qstarlight.diagnostics.DiagnosticLog
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import org.json.JSONObject
@@ -83,6 +84,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        DiagnosticLog.write("BLE SERVICE", "action=${intent?.action} role=${prefs.role()} ready=${readyMacs.size}/${prefs.devices().size}")
         if (intent == null) {
             if (prefs.role() == BlePrefs.Role.PHONE &&
                 !prefs.anyPhoneLinkConnected() &&
@@ -183,6 +185,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
                 if (requested) startStrobe() else stopStrobeInternal(restore = true)
             }
             ACTION_CONFIG_CHANGED -> {
+                startForegroundSafe("Синхронізація налаштувань")
                 ensureHubTransport()
                 hubTransport?.publishConfig()
                 hubTransport?.publishStatus("Налаштування оновлено")
@@ -988,6 +991,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
     }
 
     private fun event(type: String, mac: String? = null, name: String? = null, message: String? = null, rssi: Int? = null) {
+        DiagnosticLog.write("BLE", "event=$type mac=${mac.orEmpty()} name=${name.orEmpty()} ${message.orEmpty()}", if (type == EVENT_ERROR) "ERROR" else "INFO")
         val i = Intent(ACTION_EVENT).setPackage(packageName)
             .putExtra(EXTRA_EVENT, type)
             .putExtra(EXTRA_MAC, mac)
@@ -1093,17 +1097,21 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         }
     }
 
-    override fun onRemoteConfig(config: JSONObject): Boolean {
-        val changed = prefs.applySyncConfig(config, force = true)
-        if (changed) handler.post {
-            latestCct = prefs.white to prefs.brightness
-            event(EVENT_CONFIG_SYNC, message = "config_from_phone")
-            ensureConnections {
-                if (prefs.power) sendFrameAll(QStarProtocol.POWER_ON) { pumpLatestCct() }
-                else sendFrameAll(QStarProtocol.POWER_OFF) { }
+    override fun onRemoteConfig(config: JSONObject, onApplied: (Boolean) -> Unit) {
+        // Share the command handler so a config cannot overtake a brightness/power command.
+        handler.post {
+            val changed = prefs.applySyncConfig(config)
+            if (changed) {
+                latestCct = prefs.white to prefs.brightness
+                event(EVENT_CONFIG_SYNC, message = "config_from_phone rev=${config.optLong("revision")}")
+                QStarWidgetProvider.refresh(this)
+                ensureConnections {
+                    if (prefs.power) sendFrameAll(QStarProtocol.POWER_ON) { pumpLatestCct() }
+                    else sendFrameAll(QStarProtocol.POWER_OFF) { }
+                }
             }
+            onApplied(changed)
         }
-        return changed
     }
 
     override fun onUpdateStatus(text: String) {

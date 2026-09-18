@@ -2,6 +2,7 @@ package ua.grey.qstarlight.control
 
 import android.content.Context
 import android.content.Intent
+import ua.grey.qstarlight.diagnostics.DiagnosticLog
 import ua.grey.qstarlight.ble.BlePrefs
 import ua.grey.qstarlight.ble.QStarBleService
 import ua.grey.qstarlight.remote.RemoteLinkService
@@ -51,9 +52,7 @@ object ControlDispatcher {
 
     fun apply(context: Context, white: Int, brightness: Int) {
         val prefs = BlePrefs(context).also { it.ensureDefaults() }
-        prefs.white = white
-        prefs.brightness = brightness
-        prefs.touchConfig()
+        prefs.updateLight(white = white, brightness = brightness)
         dispatch(context, CMD_APPLY, white = white, brightness = brightness)
         configChanged(context)
         QStarWidgetProvider.refresh(context)
@@ -61,8 +60,7 @@ object ControlDispatcher {
 
     fun power(context: Context, on: Boolean) {
         val prefs = BlePrefs(context).also { it.ensureDefaults() }
-        prefs.power = on
-        prefs.touchConfig()
+        prefs.updateLight(power = on)
         dispatch(context, CMD_POWER, power = on)
         configChanged(context)
         QStarWidgetProvider.refresh(context)
@@ -70,8 +68,7 @@ object ControlDispatcher {
 
     fun brightnessSet(context: Context, value: Int) {
         val prefs = BlePrefs(context).also { it.ensureDefaults() }
-        prefs.brightness = value.coerceIn(5, 100)
-        prefs.touchConfig()
+        prefs.updateLight(brightness = value)
         dispatch(context, CMD_APPLY, white = prefs.white, brightness = prefs.brightness)
         configChanged(context)
         QStarWidgetProvider.refresh(context)
@@ -79,8 +76,7 @@ object ControlDispatcher {
 
     fun brightnessDelta(context: Context, delta: Int) {
         val prefs = BlePrefs(context).also { it.ensureDefaults() }
-        prefs.brightness = (prefs.brightness + delta).coerceIn(5, 100)
-        prefs.touchConfig()
+        prefs.updateLight(brightness = prefs.brightness + delta)
         dispatch(context, CMD_BRIGHTNESS_DELTA, delta = delta)
         configChanged(context)
         QStarWidgetProvider.refresh(context)
@@ -123,6 +119,7 @@ object ControlDispatcher {
         strobe: Boolean? = null,
         mac: String? = null
     ) {
+        DiagnosticLog.write("CONTROL", "command=$command white=$white brightness=$brightness power=$power delta=$delta strobe=$strobe mac=$mac")
         val prefs = BlePrefs(context).also { it.ensureDefaults() }
         if (prefs.role() == BlePrefs.Role.HUB) {
             val action = when (command) {

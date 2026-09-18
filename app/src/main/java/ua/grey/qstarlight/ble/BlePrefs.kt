@@ -6,6 +6,8 @@ import android.util.DisplayMetrics
 import org.json.JSONArray
 import org.json.JSONObject
 import java.security.SecureRandom
+import java.util.UUID
+import ua.grey.qstarlight.sync.ConfigVersion
 
 class BlePrefs(private val context: Context) {
     private val prefs = context.getSharedPreferences("qstar_prefs", Context.MODE_PRIVATE)
@@ -16,7 +18,8 @@ class BlePrefs(private val context: Context) {
     enum class StartupMode { RESTORE, START_ONLY, FADE_TO_TARGET, OFF }
     enum class StrobeMode { CLASSIC, DOUBLE, TRIPLE, ALTERNATE, DOUBLE_ALTERNATE, YELLOW_WHITE_SWAP }
 
-    fun ensureDefaults() {
+    fun ensureDefaults(): Unit = synchronized(CONFIG_LOCK) {
+        if (!prefs.contains(KEY_DEVICE_ID)) prefs.edit().putString(KEY_DEVICE_ID, UUID.randomUUID().toString()).apply()
         if (!prefs.contains(KEY_MAC_1)) {
             prefs.edit()
                 .putString(KEY_MAC_1, "C2:15:11:00:D3:5D")
@@ -63,36 +66,37 @@ class BlePrefs(private val context: Context) {
         return DeviceRef(mac, prefs.getString(nameKey, "QStar") ?: "QStar")
     }
 
-    fun setDevices(devices: List<DeviceRef>, touch: Boolean = true) {
+    fun setDevices(devices: List<DeviceRef>, touch: Boolean = true): Unit = synchronized(CONFIG_LOCK) {
         val ordered = canonicalOrder(devices)
         val first = ordered.getOrNull(0)
         val second = ordered.getOrNull(1)
         val e = prefs.edit()
-            .putString(KEY_MAC_1, first?.mac)
+            .putString(KEY_MAC_1, first?.mac ?: "")
             .putString(KEY_NAME_1, first?.name)
-            .putString(KEY_MAC_2, second?.mac)
+            .putString(KEY_MAC_2, second?.mac ?: "")
             .putString(KEY_NAME_2, second?.name)
-        if (touch) e.putLong(KEY_CONFIG_REVISION, nextRevision())
+        if (touch) e.putLong(KEY_CONFIG_REVISION, nextRevision()).putString(KEY_CONFIG_ORIGIN, deviceId)
         e.apply()
     }
 
-    fun updateMacByName(name: String, newMac: String) {
+    fun updateMacByName(name: String, newMac: String): Unit = synchronized(CONFIG_LOCK) {
         val macKey = when (name) {
             prefs.getString(KEY_NAME_1, null) -> KEY_MAC_1
             prefs.getString(KEY_NAME_2, null) -> KEY_MAC_2
-            else -> return
+            else -> return@synchronized
         }
-        if (prefs.getString(macKey, null).equals(newMac, ignoreCase = true)) return
+        if (prefs.getString(macKey, null).equals(newMac, ignoreCase = true)) return@synchronized
         prefs.edit()
             .putString(macKey, newMac)
             .putLong(KEY_CONFIG_REVISION, nextRevision())
+            .putString(KEY_CONFIG_ORIGIN, deviceId)
             .apply()
     }
 
     fun password(mac: String): String = prefs.getString("pwd_$mac", "1234") ?: "1234"
-    fun setPassword(mac: String, value: String, touch: Boolean = true) {
+    fun setPassword(mac: String, value: String, touch: Boolean = true): Unit = synchronized(CONFIG_LOCK) {
         val e = prefs.edit().putString("pwd_$mac", value)
-        if (touch) e.putLong(KEY_CONFIG_REVISION, nextRevision())
+        if (touch) e.putLong(KEY_CONFIG_REVISION, nextRevision()).putString(KEY_CONFIG_ORIGIN, deviceId)
         e.apply()
     }
 
@@ -108,6 +112,14 @@ class BlePrefs(private val context: Context) {
     var power: Boolean
         get() = prefs.getBoolean("power", true)
         set(value) { prefs.edit().putBoolean("power", value).apply() }
+
+    fun updateLight(white: Int? = null, brightness: Int? = null, power: Boolean? = null): Unit = synchronized(CONFIG_LOCK) {
+        val editor = prefs.edit()
+        white?.let { editor.putInt("white", it.coerceIn(0, 100)) }
+        brightness?.let { editor.putInt("brightness", it.coerceIn(5, 100)) }
+        power?.let { editor.putBoolean("power", it) }
+        editor.putLong(KEY_CONFIG_REVISION, nextRevision()).putString(KEY_CONFIG_ORIGIN, deviceId).apply()
+    }
 
     // Device-local behavior.
     var autoBoot: Boolean
@@ -302,13 +314,19 @@ class BlePrefs(private val context: Context) {
     val configRevision: Long
         get() = prefs.getLong(KEY_CONFIG_REVISION, 1L)
 
-    fun touchConfig(): Long {
+    private val deviceId: String
+        get() = prefs.getString(KEY_DEVICE_ID, "") ?: ""
+
+    val configVersion: ConfigVersion
+        get() = synchronized(CONFIG_LOCK) { ConfigVersion(configRevision, prefs.getString(KEY_CONFIG_ORIGIN, "") ?: "") }
+
+    fun touchConfig(): Long = synchronized(CONFIG_LOCK) {
         val rev = nextRevision()
-        prefs.edit().putLong(KEY_CONFIG_REVISION, rev).apply()
-        return rev
+        prefs.edit().putLong(KEY_CONFIG_REVISION, rev).putString(KEY_CONFIG_ORIGIN, deviceId).apply()
+        return@synchronized rev
     }
 
-    fun syncConfigJson(): JSONObject {
+    fun syncConfigJson(): JSONObject = synchronized(CONFIG_LOCK) {
         val devicesJson = JSONArray()
         devices().forEach { d ->
             devicesJson.put(
@@ -318,8 +336,9 @@ class BlePrefs(private val context: Context) {
                     .put("password", password(d.mac))
             )
         }
-        return JSONObject()
+        return@synchronized JSONObject()
             .put("revision", configRevision)
+            .put("origin", configVersion.origin)
             .put("power", power)
             .put("white", white)
             .put("brightness", brightness)
@@ -339,10 +358,11 @@ class BlePrefs(private val context: Context) {
     }
 
     /** Applies only if the incoming synchronized configuration is newer. */
-    fun applySyncConfig(json: JSONObject, force: Boolean = false): Boolean {
+    fun applySyncConfig(json: JSONObject, force: Boolean = false): Boolean = synchronized(CONFIG_LOCK) {
         val incomingRevision = json.optLong("revision", 0L)
-        if (incomingRevision <= 0L) return false
-        if (!force && incomingRevision <= configRevision) return false
+        if (incomingRevision <= 0L) return@synchronized false
+        val incomingVersion = ConfigVersion(incomingRevision, json.optString("origin", ""))
+        if (!force && incomingVersion <= configVersion) return@synchronized false
 
         val e = prefs.edit()
             .putBoolean("power", json.optBoolean("power", power))
@@ -361,9 +381,10 @@ class BlePrefs(private val context: Context) {
             .putInt(KEY_STROBE_OFF, json.optInt("strobeOffMs", strobeOffMs).coerceIn(40, 1000))
             .putInt(KEY_STROBE_PAUSE, json.optInt("strobePauseMs", strobePauseMs).coerceIn(100, 2000))
             .putLong(KEY_CONFIG_REVISION, incomingRevision)
+            .putString(KEY_CONFIG_ORIGIN, incomingVersion.origin)
 
         val devices = json.optJSONArray("devices")
-        if (devices != null && devices.length() > 0) {
+        if (devices != null) {
             val refs = mutableListOf<DeviceRef>()
             val passwords = mutableMapOf<String, String>()
             for (i in 0 until minOf(2, devices.length())) {
@@ -377,22 +398,22 @@ class BlePrefs(private val context: Context) {
             }
             val first = refs.getOrNull(0)
             val second = refs.getOrNull(1)
-            e.putString(KEY_MAC_1, first?.mac)
+            e.putString(KEY_MAC_1, first?.mac ?: "")
                 .putString(KEY_NAME_1, first?.name)
-                .putString(KEY_MAC_2, second?.mac)
+                .putString(KEY_MAC_2, second?.mac ?: "")
                 .putString(KEY_NAME_2, second?.name)
             passwords.forEach { (mac, password) -> e.putString("pwd_$mac", password) }
         }
         e.apply()
-        return true
+        return@synchronized true
     }
 
-    private fun putSyncInt(key: String, value: Int) {
-        prefs.edit().putInt(key, value).putLong(KEY_CONFIG_REVISION, nextRevision()).apply()
+    private fun putSyncInt(key: String, value: Int): Unit = synchronized(CONFIG_LOCK) {
+        prefs.edit().putInt(key, value).putLong(KEY_CONFIG_REVISION, nextRevision()).putString(KEY_CONFIG_ORIGIN, deviceId).apply()
     }
 
-    private fun putSyncString(key: String, value: String) {
-        prefs.edit().putString(key, value).putLong(KEY_CONFIG_REVISION, nextRevision()).apply()
+    private fun putSyncString(key: String, value: String): Unit = synchronized(CONFIG_LOCK) {
+        prefs.edit().putString(key, value).putLong(KEY_CONFIG_REVISION, nextRevision()).putString(KEY_CONFIG_ORIGIN, deviceId).apply()
     }
 
     private fun nextRevision(): Long = maxOf(System.currentTimeMillis(), configRevision + 1)
@@ -403,6 +424,9 @@ class BlePrefs(private val context: Context) {
     }
 
     companion object {
+        private val CONFIG_LOCK = Any()
+        private const val KEY_DEVICE_ID = "sync_device_id"
+        private const val KEY_CONFIG_ORIGIN = "sync_config_origin"
         private const val KEY_MAC_1 = "mac1"
         private const val KEY_NAME_1 = "name1"
         private const val KEY_MAC_2 = "mac2"

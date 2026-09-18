@@ -22,6 +22,11 @@ import java.net.Socket
 import java.net.SocketTimeoutException
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import ua.grey.qstarlight.diagnostics.DiagnosticLog
+import ua.grey.qstarlight.sync.ConfigVersion
+import ua.grey.qstarlight.sync.ConfigSyncStatus
 import kotlin.concurrent.thread
 
 class HubTransport(
@@ -32,11 +37,15 @@ class HubTransport(
     interface Listener {
         fun onRemoteCommand(command: String, payload: JSONObject)
         fun onTakeoverChanged(active: Boolean)
-        fun onRemoteConfig(config: JSONObject): Boolean
+        fun onRemoteConfig(config: JSONObject, onApplied: (Boolean) -> Unit)
         fun onUpdateStatus(text: String)
     }
 
-    private data class Client(val id: String, val socket: Socket, val writer: PrintWriter)
+    private data class Client(val id: String, val socket: Socket, val writer: PrintWriter, val supportsConfigAck: Boolean) {
+        var pendingVersion: ConfigVersion? = null
+        var confirmedVersion: ConfigVersion? = null
+    }
+    private val sender = Executors.newSingleThreadScheduledExecutor()
 
     private val running = AtomicBoolean(false)
     private val clients = CopyOnWriteArrayList<Client>()
@@ -47,6 +56,9 @@ class HubTransport(
 
     fun start() {
         if (!running.compareAndSet(false, true)) return
+        sender.scheduleWithFixedDelay({
+            clients.filter { it.pendingVersion != null }.forEach { sendConfig(it) }
+        }, 1400, 1400, TimeUnit.MILLISECONDS)
         thread(name = "QStarHubTcp", isDaemon = true) { tcpLoop() }
         thread(name = "QStarHubDiscovery", isDaemon = true) { discoveryLoop() }
         thread(name = "QStarHubUpdate", isDaemon = true) { updateLoop() }
@@ -60,6 +72,7 @@ class HubTransport(
         clients.forEach { try { it.socket.close() } catch (_: Throwable) { } }
         clients.clear()
         takeoverOwner = null
+        sender.shutdownNow()
     }
 
     fun publishBle(event: String, mac: String?, name: String?, message: String?) {
@@ -80,13 +93,15 @@ class HubTransport(
             .put("white", prefs.white)
             .put("brightness", prefs.brightness)
             .put("takeover", takeoverOwner != null)
+            .put("configRevision", prefs.configRevision).put("configOrigin", prefs.configVersion.origin)
             .put("versionCode", UpdateManager.versionCode(context))
             .put("versionName", UpdateManager.versionName(context))
         broadcast(json)
     }
 
     fun publishConfig() {
-        broadcast(JSONObject().put("type", "config_sync").put("config", prefs.syncConfigJson()))
+        ConfigSyncStatus.waiting(if (clients.isEmpty()) "Телефон не підключений • передам після підключення" else "Передаю налаштування • очікую підтвердження телефона")
+        clients.forEach { sendConfig(it) }
     }
 
     private fun tcpLoop() {
@@ -105,7 +120,8 @@ class HubTransport(
                     }
                 }
             }
-        } catch (_: Throwable) {
+        } catch (t: Throwable) {
+            if (running.get()) DiagnosticLog.write("HUB", "TCP server: ${t.javaClass.simpleName}: ${t.message}", "ERROR")
         } finally {
             serverSocket = null
         }
@@ -128,40 +144,62 @@ class HubTransport(
                 return
             }
             val id = "${socket.inetAddress.hostAddress}:${socket.port}:${System.nanoTime()}"
-            client = Client(id, socket, writer)
-            clients += client
+            val peer = Client(id, socket, writer, hello.optInt("protocol", 2) >= 3)
+            client = peer
             writer.println(
                 JSONObject()
                     .put("type", "hello")
                     .put("ok", true)
                     .put("name", Build.MODEL ?: "QStar Hub")
-                    .put("protocol", 2)
+                    .put("protocol", 3)
+                    .put("configRevision", prefs.configRevision).put("configOrigin", prefs.configVersion.origin)
                     .put("versionCode", UpdateManager.versionCode(context))
                     .put("versionName", UpdateManager.versionName(context))
-                    .put("configRevision", prefs.configRevision)
             )
-            sendStatus(client, "Магнітола готова")
-            sendConfig(client)
+            clients += peer
+            DiagnosticLog.write("HUB", "Client authorized: $id; version=${hello.optString("versionName")}")
+            sendStatus(peer, "Магнітола готова")
+            sendConfig(peer)
 
             while (running.get() && !socket.isClosed) {
                 val line = try { reader.readLine() } catch (_: SocketTimeoutException) {
-                    writer.println(JSONObject().put("type", "pong"))
+                    send(peer, JSONObject().put("type", "pong"))
                     continue
                 } ?: break
+                DiagnosticLog.write("HUB RX", "peer=$id $line")
                 val json = try { JSONObject(line) } catch (_: Throwable) { continue }
                 when (json.optString("type")) {
-                    "ping" -> writer.println(JSONObject().put("type", "pong"))
-                    "status_request" -> sendStatus(client, "Магнітола online")
-                    "config_request" -> sendConfig(client)
+                    "ping" -> send(peer, JSONObject().put("type", "pong"))
+                    "status_request" -> sendStatus(peer, "Магнітола online")
+                    "config_request" -> sendConfig(peer)
                     "config_sync" -> {
                         val config = json.optJSONObject("config")
                         if (config != null && config.optLong("revision", 0L) > 0L) {
-                            listener.onRemoteConfig(config)
-                            writer.println(JSONObject().put("type", "config_ack").put("revision", config.optLong("revision", 0L)))
-                            publishConfig()
-                            publishStatus("Налаштування синхронізовано")
-                        } else {
-                            sendConfig(client)
+                            listener.onRemoteConfig(config) { changed ->
+                                val actual = prefs.syncConfigJson()
+                                val requested = ConfigVersion(config.optLong("revision"), config.optString("origin", ""))
+                                val accepted = requested == ConfigVersion(actual.optLong("revision"), actual.optString("origin", ""))
+                                send(peer, JSONObject().put("type", "config_ack")
+                                    .put("revision", requested.revision).put("origin", requested.origin)
+                                    .put("accepted", accepted).put("config", actual))
+                                DiagnosticLog.write("SYNC HUB", "rev=${requested.revision} accepted=$accepted changed=$changed")
+                                if (changed) {
+                                    publishConfig()
+                                    publishStatus("Налаштування синхронізовано")
+                                } else sendConfig(peer)
+                            }
+                        } else sendConfig(peer)
+                    }
+                    "config_ack" -> {
+                        val ack = ConfigVersion(json.optLong("revision", -1L), json.optString("origin", ""))
+                        sender.execute {
+                            if (ack.acknowledges(peer.pendingVersion, prefs.configVersion, json.optBoolean("accepted", false))) {
+                                peer.pendingVersion = null
+                                peer.confirmedVersion = ack
+                                val count = clients.count { it.confirmedVersion == ack }
+                                if (count == clients.size) ConfigSyncStatus.confirmed(ack, "телефонами $count/${clients.size}")
+                                else ConfigSyncStatus.waiting("Підтверджено телефонами $count/${clients.size}")
+                            }
                         }
                     }
                     "takeover" -> {
@@ -169,33 +207,38 @@ class HubTransport(
                         if (current == null || current == id) {
                             takeoverOwner = id
                             listener.onTakeoverChanged(true)
-                            writer.println(JSONObject().put("type", "ack").put("message", "direct_takeover_granted"))
+                            send(peer, JSONObject().put("type", "ack").put("message", "direct_takeover_granted"))
                             publishStatus("Телефон керує лампами напряму")
                         } else {
-                            writer.println(JSONObject().put("type", "ack").put("message", "takeover_busy"))
+                            send(peer, JSONObject().put("type", "ack").put("message", "takeover_busy"))
                         }
                     }
                     "resume" -> {
                         if (takeoverOwner == null || takeoverOwner == id) {
                             takeoverOwner = null
                             listener.onTakeoverChanged(false)
-                            writer.println(JSONObject().put("type", "ack").put("message", "hub_resumed"))
+                            send(peer, JSONObject().put("type", "ack").put("message", "hub_resumed"))
                             publishStatus("Магнітола керує лампами")
                         }
                     }
                     "command" -> {
                         if (takeoverOwner != null) {
-                            writer.println(JSONObject().put("type", "ack").put("message", "direct_takeover_active"))
+                            send(peer, JSONObject().put("type", "ack").put("message", "direct_takeover_active"))
                         } else {
                             listener.onRemoteCommand(json.optString("command"), json)
-                            writer.println(JSONObject().put("type", "ack").put("message", "command_accepted"))
+                            send(peer, JSONObject().put("type", "ack").put("message", "command_accepted"))
                         }
                     }
                 }
             }
-        } catch (_: Throwable) {
+        } catch (t: Throwable) {
+            DiagnosticLog.write("HUB", "Client error: ${t.javaClass.simpleName}: ${t.message}", "ERROR")
         } finally {
-            client?.let { clients.remove(it) }
+            client?.let {
+                clients.remove(it)
+                DiagnosticLog.write("HUB", "Client disconnected: ${it.id}")
+                if (clients.isEmpty()) ConfigSyncStatus.waiting("Телефон відключено • очікую з’єднання")
+            }
             try { socket.close() } catch (_: Throwable) { }
             val ownerId = takeoverOwner
             if (client != null && ownerId == client.id) {
@@ -212,36 +255,46 @@ class HubTransport(
     }
 
     private fun sendStatus(client: Client, text: String) {
-        try {
-            client.writer.println(
-                JSONObject()
-                    .put("type", "status")
-                    .put("text", text)
-                    .put("power", prefs.power)
-                    .put("white", prefs.white)
-                    .put("brightness", prefs.brightness)
-                    .put("takeover", takeoverOwner != null)
-                    .put("versionCode", UpdateManager.versionCode(context))
-                    .put("versionName", UpdateManager.versionName(context))
-            )
-        } catch (_: Throwable) { }
+        send(client, JSONObject()
+            .put("type", "status").put("text", text)
+            .put("power", prefs.power).put("white", prefs.white).put("brightness", prefs.brightness)
+            .put("takeover", takeoverOwner != null)
+            .put("configRevision", prefs.configRevision).put("configOrigin", prefs.configVersion.origin)
+            .put("versionCode", UpdateManager.versionCode(context))
+            .put("versionName", UpdateManager.versionName(context)))
     }
 
     private fun sendConfig(client: Client) {
+        if (sender.isShutdown) return
+        sender.execute {
+            if (client !in clients) return@execute
+            val config = prefs.syncConfigJson()
+            client.pendingVersion = if (client.supportsConfigAck) ConfigVersion(config.optLong("revision"), config.optString("origin", "")) else null
+            if (!client.supportsConfigAck) ConfigSyncStatus.waiting("Надіслано • онови телефон для підтвердження синхронізації")
+            write(client, JSONObject().put("type", "config_sync").put("config", config).toString())
+        }
+    }
+
+    private fun send(client: Client, json: JSONObject) {
+        val payload = json.toString()
+        if (!sender.isShutdown) sender.execute { write(client, payload) }
+    }
+
+    private fun write(client: Client, payload: String) {
+        if (client !in clients) return
         try {
-            client.writer.println(JSONObject().put("type", "config_sync").put("config", prefs.syncConfigJson()))
-        } catch (_: Throwable) { }
+            client.writer.println(payload)
+            if (client.writer.checkError()) throw IllegalStateException("socket write failed")
+            DiagnosticLog.write("HUB TX", "peer=${client.id} $payload")
+        } catch (t: Throwable) {
+            DiagnosticLog.write("HUB TX", "peer=${client.id} ${t.javaClass.simpleName}: ${t.message}", "ERROR")
+            clients.remove(client)
+            runCatching { client.socket.close() }
+        }
     }
 
     private fun broadcast(json: JSONObject) {
-        clients.forEach { client ->
-            try {
-                client.writer.println(json.toString())
-                if (client.writer.checkError()) clients.remove(client)
-            } catch (_: Throwable) {
-                clients.remove(client)
-            }
-        }
+        clients.forEach { send(it, json) }
     }
 
     private fun discoveryLoop() {
@@ -267,7 +320,8 @@ class HubTransport(
                 } catch (_: SocketTimeoutException) {
                 }
             }
-        } catch (_: Throwable) {
+        } catch (t: Throwable) {
+            if (running.get()) DiagnosticLog.write("HUB", "Discovery: ${t.javaClass.simpleName}: ${t.message}", "ERROR")
         } finally {
             try { socket?.close() } catch (_: Throwable) { }
             discoverySocket = null
@@ -289,7 +343,8 @@ class HubTransport(
                     } catch (_: SocketTimeoutException) { }
                 }
             }
-        } catch (_: Throwable) {
+        } catch (t: Throwable) {
+            if (running.get()) DiagnosticLog.write("HUB", "Update server: ${t.javaClass.simpleName}: ${t.message}", "ERROR")
         } finally {
             updateServerSocket = null
         }
