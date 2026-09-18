@@ -120,6 +120,8 @@ class RemoteLinkService : Service() {
         running.set(false)
         closeSocket()
         connected = false
+        prefs.hubRuntimeState = BlePrefs.RuntimeLinkState.OFFLINE
+        QStarWidgetProvider.refresh(this)
         hubVersionCode = -1L
         pendingConfigRevision = null
         pendingConfigJson = null
