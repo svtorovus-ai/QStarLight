@@ -21,6 +21,7 @@ import ua.grey.qstarlight.ble.QStarBleService
 import ua.grey.qstarlight.control.ControlActionReceiver
 import ua.grey.qstarlight.control.ControlDispatcher
 import ua.grey.qstarlight.update.UpdateManager
+import ua.grey.qstarlight.widget.QStarWidgetProvider
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.File
@@ -53,6 +54,7 @@ class RemoteLinkService : Service() {
     @Volatile private var pendingConfigJson: JSONObject? = null
     @Volatile private var configRetryScheduled = false
     @Volatile private var autoLampWake = false
+    @Volatile private var pendingConnectMissing = false
     private var sessionStopRunnable: Runnable? = null
 
     override fun onCreate() {
@@ -65,8 +67,10 @@ class RemoteLinkService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (prefs.role() == BlePrefs.Role.PHONE && intent?.action != ACTION_STOP) {
-            if (!prefs.phoneSessionActive()) prefs.beginPhoneSession()
-            scheduleSessionStop()
+            if (!prefs.anyPhoneLinkConnected() && !prefs.phoneOfflineGraceActive()) {
+                prefs.startPhoneOfflineGrace()
+            }
+            reconcilePhoneLifetime()
         }
         when (intent?.action) {
             ACTION_STOP -> {
@@ -78,9 +82,8 @@ class RemoteLinkService : Service() {
                 return START_NOT_STICKY
             }
             ACTION_AUTO_WAKE -> {
-                if (!prefs.phoneSessionActive()) prefs.beginPhoneSession()
                 autoLampWake = intent.getBooleanExtra(EXTRA_FROM_LAMP, false)
-                scheduleSessionStop()
+                reconcilePhoneLifetime()
                 startForegroundSafe()
                 ensureLoop()
             }
@@ -105,8 +108,7 @@ class RemoteLinkService : Service() {
                 pushSelfUpdate(manual = true)
             }
             else -> {
-                if (!prefs.phoneSessionActive()) prefs.beginPhoneSession()
-                scheduleSessionStop()
+                reconcilePhoneLifetime()
                 startForegroundSafe()
                 ensureLoop()
             }
@@ -134,14 +136,16 @@ class RemoteLinkService : Service() {
 
     private fun connectionLoop() {
         while (running.get()) {
-            if (!prefs.phoneSessionActive()) {
-                running.set(false)
-                break
-            }
             if (prefs.role() != BlePrefs.Role.PHONE) {
                 running.set(false)
                 break
             }
+            if (!prefs.anyPhoneLinkConnected() && !prefs.phoneOfflineGraceActive()) {
+                running.set(false)
+                break
+            }
+            prefs.hubRuntimeState = BlePrefs.RuntimeLinkState.CONNECTING
+            QStarWidgetProvider.refresh(this)
             broadcast(EVENT_CONNECTING, "Пошук магнітоли…")
             val host = chooseHost()
             if (host == null) {
@@ -183,6 +187,10 @@ class RemoteLinkService : Service() {
                 hubVersionCode = helloJson.optLong("versionCode", -1L)
                 setConnected(true, "Магнітола online", host)
                 autoLampWake = false
+                if (pendingConnectMissing) {
+                    sendLine(JSONObject().put("type", "command").put("command", ControlDispatcher.CMD_CONNECT))
+                    pendingConnectMissing = false
+                }
 
                 // Exchange synchronized settings immediately after authorization.
                 sendConfigNow()
@@ -338,6 +346,12 @@ class RemoteLinkService : Service() {
             if (intent.hasExtra(EXTRA_MAC)) json.put("mac", intent.getStringExtra(EXTRA_MAC))
             sendLine(json)
             broadcast(EVENT_ROUTE, "Команда через магнітолу", currentHost)
+        } else if (cmd == ControlDispatcher.CMD_CONNECT) {
+            pendingConnectMissing = true
+            if (prefs.forceDirect || prefs.directFallback) {
+                dispatchDirect(intent)
+            }
+            broadcast(EVENT_CONNECTING, "Підключаю відсутні пристрої…")
         } else if (prefs.directFallback) {
             dispatchDirect(intent)
             broadcast(EVENT_ROUTE, "Магнітола offline, команда напряму")
@@ -515,33 +529,53 @@ class RemoteLinkService : Service() {
         }
     }
 
-    private fun scheduleSessionStop() {
+    private fun reconcilePhoneLifetime() {
+        if (prefs.role() != BlePrefs.Role.PHONE) return
         sessionStopRunnable?.let(handler::removeCallbacks)
-        val task = object : Runnable {
-            override fun run() {
-                val remaining = prefs.phoneSessionUntil - System.currentTimeMillis()
-                if (remaining > 0L) {
-                    handler.postDelayed(this, remaining.coerceAtMost(BlePrefs.PHONE_SESSION_MS))
-                    return
-                }
-                running.set(false)
-                closeSocket()
-                QStarBleService.start(this@RemoteLinkService, Intent().setAction(QStarBleService.ACTION_RELEASE))
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
+        sessionStopRunnable = null
+
+        if (prefs.anyPhoneLinkConnected()) {
+            prefs.clearPhoneOfflineGrace()
+            return
+        }
+
+        val until = prefs.startPhoneOfflineGrace()
+        val remaining = until - System.currentTimeMillis()
+        if (remaining <= 0L) {
+            stopAfterOfflineGrace()
+            return
+        }
+
+        val task = Runnable {
+            if (prefs.anyPhoneLinkConnected()) {
+                prefs.clearPhoneOfflineGrace()
+            } else if (prefs.phoneOfflineGraceActive()) {
+                reconcilePhoneLifetime()
+            } else {
+                stopAfterOfflineGrace()
             }
         }
         sessionStopRunnable = task
-        val delay = (prefs.phoneSessionUntil - System.currentTimeMillis()).coerceAtLeast(1_000L)
-        handler.postDelayed(task, delay)
+        handler.postDelayed(task, remaining.coerceAtLeast(1_000L))
+    }
+
+    private fun stopAfterOfflineGrace() {
+        if (prefs.anyPhoneLinkConnected()) return
+        prefs.clearPhoneOfflineGrace()
+        running.set(false)
+        closeSocket()
+        QStarBleService.start(this, Intent().setAction(QStarBleService.ACTION_RELEASE))
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
     }
 
     private fun setConnected(value: Boolean, message: String, host: String? = null) {
         connected = value
-        if (value && prefs.role() == BlePrefs.Role.PHONE) {
-            prefs.beginPhoneSession()
-            scheduleSessionStop()
-        }
+        prefs.hubRuntimeState =
+            if (value) BlePrefs.RuntimeLinkState.CONNECTED else BlePrefs.RuntimeLinkState.OFFLINE
+        if (value) prefs.markPhoneLinkAvailable() else if (!prefs.anyPhoneLinkConnected()) prefs.startPhoneOfflineGrace()
+        reconcilePhoneLifetime()
+        QStarWidgetProvider.refresh(this)
         broadcast(if (value) EVENT_CONNECTED else EVENT_DISCONNECTED, message, host)
         updateNotification(message)
     }
