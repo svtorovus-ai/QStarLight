@@ -855,6 +855,10 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
     override fun onReady(mac: String) {
         event(EVENT_READY, mac, connections[mac]?.name, "ready")
         readyMacs.add(mac)
+        if (prefs.role() == BlePrefs.Role.PHONE) {
+            prefs.beginPhoneSession()
+            schedulePhoneSessionStop()
+        }
         if (connectingMac == mac) connectingMac = null
         val connection = connections[mac]
         if (safetyFallbackActive && connection != null) {
