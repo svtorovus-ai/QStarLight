@@ -23,7 +23,7 @@ class QStarWidgetProvider : AppWidgetProvider() {
                 prefs.white >= 85 -> "Білий"
                 else -> "Теплий"
             }
-            views.setTextViewText(R.id.widgetStatus, "$colorName • \${prefs.brightness}%")
+            views.setTextViewText(R.id.widgetStatus, "$colorName • ${prefs.brightness}%")
             views.setOnClickPendingIntent(R.id.widgetRoot, openAppIntent(context))
 
             val devices = prefs.devices()
