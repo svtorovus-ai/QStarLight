@@ -60,16 +60,31 @@ class GitHubUpdateWorker(
 
         val assets = release.optJSONArray("assets") ?: return
         var downloadUrl: String? = null
+        var checksumUrl: String? = null
         for (i in 0 until assets.length()) {
             val asset = assets.optJSONObject(i) ?: continue
-            if (asset.optString("name") == "QStarLight.apk") {
-                downloadUrl = asset.optString("browser_download_url")
-                break
+            when (asset.optString("name")) {
+                "QStarLight.apk" -> downloadUrl = asset.optString("browser_download_url")
+                "QStarLight.apk.sha256" -> checksumUrl = asset.optString("browser_download_url")
             }
         }
         val url = downloadUrl?.takeIf { it.startsWith("https://") } ?: return
         val file = File(UpdateManager.updateDir(applicationContext), "github-latest.apk")
         download(url, file)
+
+        checksumUrl?.takeIf { it.startsWith("https://") }?.let { checksumAsset ->
+            val expected = downloadText(checksumAsset)
+                .trim()
+                .substringBefore(' ')
+                .lowercase()
+            if (expected.length == 64 && expected.any { it != '0' }) {
+                val actual = UpdateManager.sha256(file).lowercase()
+                if (actual != expected) {
+                    file.delete()
+                    throw IllegalStateException("GitHub update checksum mismatch")
+                }
+            }
+        }
 
         val archiveVersion = UpdateManager.archiveVersionCode(applicationContext, file) ?: run {
             file.delete()
@@ -91,11 +106,28 @@ class GitHubUpdateWorker(
             readTimeout = 7_000
             requestMethod = "GET"
             setRequestProperty("Accept", "application/vnd.github+json")
+            setRequestProperty("Cache-Control", "no-cache")
             setRequestProperty("User-Agent", "QStarLight/" + UpdateManager.versionName(applicationContext))
         }
         return try {
             if (conn.responseCode !in 200..299) return null
             JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    private fun downloadText(url: String): String {
+        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 8_000
+            readTimeout = 15_000
+            instanceFollowRedirects = true
+            setRequestProperty("Cache-Control", "no-cache")
+            setRequestProperty("User-Agent", "QStarLight")
+        }
+        return try {
+            if (conn.responseCode !in 200..299) throw IllegalStateException("HTTP " + conn.responseCode)
+            conn.inputStream.bufferedReader().use { it.readText() }
         } finally {
             conn.disconnect()
         }
