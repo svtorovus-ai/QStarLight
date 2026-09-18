@@ -22,7 +22,8 @@ object ControlDispatcher {
         if (prefs.role() == BlePrefs.Role.HUB) {
             QStarBleService.start(context, Intent().setAction(QStarBleService.ACTION_HUB_START))
         } else {
-            RemoteLinkService.start(context)
+            // Top-level connect is idempotent: connect the HUB and ask it to recover only missing lamps.
+            RemoteLinkService.sendCommand(context, CMD_CONNECT)
         }
     }
 
