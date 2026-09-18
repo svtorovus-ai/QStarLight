@@ -8,6 +8,8 @@ val qstarStorePassword = System.getenv("QSTAR_STORE_PASSWORD")
 val qstarKeyAlias = System.getenv("QSTAR_KEY_ALIAS")
 val qstarKeyPassword = System.getenv("QSTAR_KEY_PASSWORD")
 val hasStableSigning = listOf(qstarKeystorePath, qstarStorePassword, qstarKeyAlias, qstarKeyPassword).all { !it.isNullOrBlank() }
+val qstarDebugKeystorePath = System.getenv("QSTAR_DEBUG_KEYSTORE_FILE")
+    ?: "${System.getProperty("user.home")}/.android/debug.keystore"
 
 android {
     namespace = "ua.grey.qstarlight"
@@ -16,12 +18,18 @@ android {
         applicationId = "ua.grey.qstarlight"
         minSdk = 26
         targetSdk = 35
-        versionCode = 10
-        versionName = "0.5.2"
+        versionCode = 11
+        versionName = "0.5.3"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
-    if (hasStableSigning) {
-        signingConfigs {
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file(qstarDebugKeystorePath)
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+        if (hasStableSigning) {
             create("qstarStable") {
                 storeFile = rootProject.file(qstarKeystorePath!!)
                 storePassword = qstarStorePassword
@@ -31,7 +39,9 @@ android {
         }
     }
     buildTypes {
-        getByName("debug")
+        getByName("debug") {
+            signingConfig = signingConfigs.getByName("debug")
+        }
         release {
             isMinifyEnabled = false
             if (hasStableSigning) signingConfig = signingConfigs.getByName("qstarStable")
