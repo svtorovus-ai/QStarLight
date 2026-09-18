@@ -42,6 +42,11 @@ object UpdateManager {
 
     fun updateDir(context: Context): File = File(context.cacheDir, "updates").apply { mkdirs() }
 
+    fun archiveVersionCode(context: Context, apk: File): Long? {
+        val archive = context.packageManager.getPackageArchiveInfo(apk.absolutePath, 0) ?: return null
+        return if (Build.VERSION.SDK_INT >= 28) archive.longVersionCode else @Suppress("DEPRECATION") archive.versionCode.toLong()
+    }
+
     /**
      * Validate package name, version and signing certificate against the currently installed app.
      * This prevents an arbitrary APK received over the local network from being installed.
