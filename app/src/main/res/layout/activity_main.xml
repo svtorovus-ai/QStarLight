@@ -7,7 +7,9 @@
 
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="68dp"
+        android:layout_height="74dp"
+        android:background="@drawable/bg_header_glow"
+        android:elevation="7dp"
         android:gravity="center_vertical"
         android:orientation="horizontal"
         android:paddingStart="18dp"
@@ -71,8 +73,8 @@
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:background="@drawable/bg_card"
-                    android:elevation="5dp"
+                    android:background="@drawable/bg_status_panel"
+                    android:elevation="8dp"
                     android:orientation="vertical"
                     android:padding="15dp">
                     <LinearLayout
@@ -210,7 +212,7 @@
                             android:layout_weight="1"
                             android:background="@drawable/bg_preset_yellow"
                             android:text="ЖОВТИЙ"
-                            android:textColor="#16110A"
+                            android:textColor="#FFD76A"
                             android:textStyle="bold" />
                         <Space android:layout_width="9dp" android:layout_height="1dp" />
                         <Button
@@ -220,7 +222,7 @@
                             android:layout_weight="1"
                             android:background="@drawable/bg_preset_warm"
                             android:text="ТЕПЛИЙ"
-                            android:textColor="#17130D"
+                            android:textColor="#FFE2A8"
                             android:textStyle="bold" />
                         <Space android:layout_width="9dp" android:layout_height="1dp" />
                         <Button
@@ -230,7 +232,7 @@
                             android:layout_weight="1"
                             android:background="@drawable/bg_preset_white"
                             android:text="БІЛИЙ"
-                            android:textColor="#11151A"
+                            android:textColor="#F3F8FC"
                             android:textStyle="bold" />
                     </LinearLayout>
 
@@ -520,7 +522,8 @@
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="58dp"
-        android:background="#F20A0E14"
+        android:background="@drawable/bg_bottom_nav"
+        android:elevation="9dp"
         android:orientation="horizontal"
         android:padding="7dp">
         <Button
