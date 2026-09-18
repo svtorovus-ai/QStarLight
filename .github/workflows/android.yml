@@ -40,6 +40,13 @@ jobs:
         with:
           gradle-version: '8.9'
 
+      - name: Restore persistent debug signing identity
+        if: ${{ env.QSTAR_KEYSTORE_B64 == '' }}
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: qstarlight-debug-signing-v1
+
       - name: Restore stable signing key
         if: ${{ env.QSTAR_KEYSTORE_B64 != '' }}
         run: |
@@ -93,22 +100,24 @@ jobs:
           path: app/build/outputs/apk/release/app-release.apk
 
       - name: Read app version
-        if: ${{ env.QSTAR_KEYSTORE_B64 != '' }}
         id: appmeta
         shell: bash
         run: |
           VERSION_NAME="$(grep -oP 'versionName = "\\K[^"]+' app/build.gradle.kts)"
           echo "version_name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
 
-      - name: Prepare release asset
-        if: ${{ env.QSTAR_KEYSTORE_B64 != '' }}
+      - name: Prepare GitHub update asset
+        shell: bash
         run: |
           mkdir -p dist
-          cp app/build/outputs/apk/release/app-release.apk dist/QStarLight.apk
+          if [ -n "$QSTAR_KEYSTORE_B64" ]; then
+            cp app/build/outputs/apk/release/app-release.apk dist/QStarLight.apk
+          else
+            cp app/build/outputs/apk/debug/app-debug.apk dist/QStarLight.apk
+          fi
           sha256sum dist/QStarLight.apk > dist/QStarLight.apk.sha256
 
       - name: Publish GitHub release
-        if: ${{ env.QSTAR_KEYSTORE_B64 != '' }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.appmeta.outputs.version_name }}
