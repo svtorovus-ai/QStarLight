@@ -14,6 +14,7 @@ object ControlDispatcher {
     const val CMD_BRIGHTNESS_DELTA = "brightness_delta"
     const val CMD_STROBE = "strobe"
     const val CMD_CONNECT = "connect"
+    const val CMD_CONNECT_DEVICE = "connect_device"
     const val CMD_SCAN = "scan"
 
     fun connect(context: Context) {
@@ -22,6 +23,19 @@ object ControlDispatcher {
             QStarBleService.start(context, Intent().setAction(QStarBleService.ACTION_HUB_START))
         } else {
             RemoteLinkService.start(context)
+        }
+    }
+
+    fun connectDevice(context: Context, mac: String) {
+        val prefs = BlePrefs(context).also { it.ensureDefaults() }
+        if (prefs.role() == BlePrefs.Role.HUB) {
+            QStarBleService.start(
+                context,
+                Intent().setAction(QStarBleService.ACTION_CONNECT_DEVICE)
+                    .putExtra(QStarBleService.EXTRA_MAC, mac)
+            )
+        } else {
+            RemoteLinkService.sendCommand(context, CMD_CONNECT_DEVICE, mac = mac)
         }
     }
 
@@ -105,7 +119,8 @@ object ControlDispatcher {
         brightness: Int? = null,
         power: Boolean? = null,
         delta: Int? = null,
-        strobe: Boolean? = null
+        strobe: Boolean? = null,
+        mac: String? = null
     ) {
         val prefs = BlePrefs(context).also { it.ensureDefaults() }
         if (prefs.role() == BlePrefs.Role.HUB) {
@@ -123,9 +138,10 @@ object ControlDispatcher {
             power?.let { i.putExtra(QStarBleService.EXTRA_POWER, it) }
             delta?.let { i.putExtra(QStarBleService.EXTRA_DELTA, it) }
             strobe?.let { i.putExtra(QStarBleService.EXTRA_STROBE_ENABLED, it) }
+            mac?.let { i.putExtra(QStarBleService.EXTRA_MAC, it) }
             QStarBleService.start(context, i)
         } else {
-            RemoteLinkService.sendCommand(context, command, white, brightness, power, delta, strobe)
+            RemoteLinkService.sendCommand(context, command, white, brightness, power, delta, strobe, mac)
         }
     }
 }
