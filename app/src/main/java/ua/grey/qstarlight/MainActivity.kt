@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -15,6 +16,7 @@ import android.os.Looper
 import android.provider.Settings
 import android.view.View
 import android.view.MotionEvent
+import android.view.ViewConfiguration
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Button
@@ -33,13 +35,21 @@ import ua.grey.qstarlight.ble.QStarBleService
 import ua.grey.qstarlight.control.ControlDispatcher
 import ua.grey.qstarlight.remote.RemoteLinkService
 import ua.grey.qstarlight.update.UpdateManager
+import ua.grey.qstarlight.update.UpdateScheduler
 import java.util.LinkedHashMap
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
     private lateinit var prefs: BlePrefs
     private val handler = Handler(Looper.getMainLooper())
     private val found = LinkedHashMap<String, BlePrefs.DeviceRef>()
     private val statusByMac = LinkedHashMap<String, String>()
+    private val stateByMac = LinkedHashMap<String, UiLinkState>()
+    private var hubUiState = UiLinkState.OFFLINE
+
+    private enum class UiLinkState { CONNECTED, CONNECTING, OFFLINE }
     private var pendingSliderSend: Runnable? = null
     private var pendingConfigSync: Runnable? = null
     private var updatingUi = false
@@ -209,7 +219,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun configureUi() {
         updatingUi = true
-        tvVersion.text = "v${UpdateManager.versionName(this)}"
+        val packageInfo = packageManager.getPackageInfo(packageName, 0)
+        val updated = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date(packageInfo.lastUpdateTime))
+        tvVersion.text = "v${UpdateManager.versionName(this)} • оновлено $updated"
 
         spinnerStartupMode.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, startupLabels)
         spinnerStrobeMode.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, strobeLabels)
@@ -293,6 +305,10 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btnReconnect).setOnClickListener {
             if (ensurePermissions()) ControlDispatcher.connect(this)
         }
+        tvLinkStatus.setOnClickListener { retryHubConnection() }
+        tvRemoteStatus.setOnClickListener { retryHubConnection() }
+        tvLamp1.setOnClickListener { retryLamp(0) }
+        tvLamp2.setOnClickListener { retryLamp(1) }
         findViewById<Button>(R.id.btnYellow).setOnClickListener { setPreset(0) }
         findViewById<Button>(R.id.btnWarm).setOnClickListener { setPreset(50) }
         findViewById<Button>(R.id.btnWhite).setOnClickListener { setPreset(100) }
@@ -448,10 +464,26 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun lockScrollWhileSeeking(seek: SeekBar) {
+        val slop = ViewConfiguration.get(this).scaledTouchSlop
+        var downX = 0f
+        var downY = 0f
+        var horizontalDrag = false
         seek.setOnTouchListener { view, event ->
             when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> view.parent?.requestDisallowInterceptTouchEvent(true)
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> view.parent?.requestDisallowInterceptTouchEvent(false)
+                MotionEvent.ACTION_DOWN -> {
+                    downX = event.x
+                    downY = event.y
+                    horizontalDrag = false
+                    view.parent?.requestDisallowInterceptTouchEvent(false)
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = kotlin.math.abs(event.x - downX)
+                    val dy = kotlin.math.abs(event.y - downY)
+                    if (!horizontalDrag && maxOf(dx, dy) > slop) horizontalDrag = dx > dy
+                    view.parent?.requestDisallowInterceptTouchEvent(horizontalDrag)
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
+                    view.parent?.requestDisallowInterceptTouchEvent(false)
             }
             false
         }
@@ -465,6 +497,8 @@ class MainActivity : AppCompatActivity() {
         ContextCompat.registerReceiver(
             this, remoteReceiver, IntentFilter(RemoteLinkService.ACTION_EVENT), ContextCompat.RECEIVER_NOT_EXPORTED
         )
+        PresenceMonitor.ensure(this)
+        UpdateScheduler.ensure(this)
         runCatching { if (ensurePermissions(false) || prefs.role() == BlePrefs.Role.PHONE) ControlDispatcher.connect(this) }
             .onFailure { appendLog("START ERROR ${it.javaClass.simpleName}: ${it.message.orEmpty()}") }
     }
@@ -473,7 +507,6 @@ class MainActivity : AppCompatActivity() {
         super.onStop()
         try { unregisterReceiver(receiver) } catch (_: Throwable) { }
         try { unregisterReceiver(remoteReceiver) } catch (_: Throwable) { }
-        if (prefs.role() == BlePrefs.Role.PHONE && !prefs.remoteKeepAlive) RemoteLinkService.stop(this)
     }
 
     private fun showPage(settings: Boolean) {
@@ -725,7 +758,10 @@ class MainActivity : AppCompatActivity() {
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == 100 && ensurePermissions(false)) ControlDispatcher.connect(this)
+        if (requestCode == 100 && ensurePermissions(false)) {
+            PresenceMonitor.ensure(this)
+            ControlDispatcher.connect(this)
+        }
     }
 
     private val receiver = object : BroadcastReceiver() {
