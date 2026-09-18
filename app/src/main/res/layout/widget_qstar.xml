@@ -34,7 +34,7 @@
             android:paddingEnd="9dp"
             android:paddingBottom="4dp"
             android:text="Білий • 100%"
-            android:textColor="#F6D783"
+            android:textColor="#72EAF3"
             android:textSize="10sp"
             android:textStyle="bold" />
     </LinearLayout>
@@ -96,7 +96,7 @@
             android:minWidth="0dp"
             android:minHeight="0dp"
             android:text="ЖОВТИЙ"
-            android:textColor="#17120A"
+            android:textColor="#FFD76A"
             android:textSize="9sp"
             android:textStyle="bold" />
 
@@ -111,7 +111,7 @@
             android:minWidth="0dp"
             android:minHeight="0dp"
             android:text="ТЕПЛИЙ"
-            android:textColor="#17130D"
+            android:textColor="#FFE2A8"
             android:textSize="9sp"
             android:textStyle="bold" />
 
@@ -126,7 +126,7 @@
             android:minWidth="0dp"
             android:minHeight="0dp"
             android:text="БІЛИЙ"
-            android:textColor="#101319"
+            android:textColor="#F4F9FC"
             android:textSize="9sp"
             android:textStyle="bold" />
 
@@ -139,7 +139,7 @@
             android:minWidth="0dp"
             android:minHeight="0dp"
             android:text="⚡"
-            android:textColor="#FFC94A"
+            android:textColor="#63E6F0"
             android:textSize="17sp"
             android:textStyle="bold" />
     </LinearLayout>
