@@ -556,13 +556,14 @@ class MainActivity : AppCompatActivity() {
         } else {
             "Основний канал: телефон → магнітола → лампи"
         }
-        tvRemoteStatus.text = if (RemoteLinkService.connected) "Магнітола online" else "Магнітола: пошук / offline"
-        tvLinkStatus.text = if (hub) {
-            "Основний контролер"
+        if (hub) {
+            setHubStatus(UiLinkState.CONNECTED, "Магнітола • HUB активний")
         } else if (RemoteLinkService.connected) {
-            "Зв'язок з магнітолою є"
+            setHubStatus(UiLinkState.CONNECTED, "Магнітола • підключено")
+        } else if (hubUiState == UiLinkState.CONNECTING) {
+            setHubStatus(UiLinkState.CONNECTING, "Магнітола • підключення…")
         } else {
-            "Очікування магнітоли"
+            setHubStatus(UiLinkState.OFFLINE, "Магнітола • немає з'єднання")
         }
 
         tvUpdateStatus.text = if (hub) {
@@ -652,15 +653,82 @@ class MainActivity : AppCompatActivity() {
         }, 100)
     }
 
+    private fun stateColor(state: UiLinkState): Int = when (state) {
+        UiLinkState.CONNECTED -> Color.rgb(76, 175, 80)
+        UiLinkState.CONNECTING -> Color.rgb(255, 193, 7)
+        UiLinkState.OFFLINE -> Color.rgb(239, 83, 80)
+    }
+
+    private fun setHubStatus(state: UiLinkState, text: String) {
+        hubUiState = state
+        tvLinkStatus.text = "● $text"
+        tvLinkStatus.setTextColor(stateColor(state))
+        tvRemoteStatus.text = "● $text"
+        tvRemoteStatus.setTextColor(stateColor(state))
+    }
+
     private fun updateLampCards() {
         val devices = prefs.devices()
-        fun textFor(index: Int): String {
-            val d = devices.getOrNull(index) ?: return "Лампа ${index + 1}\nне вибрана"
-            val status = statusByMac[d.mac] ?: "очікування"
-            return "${d.name}\n$status"
+        fun apply(view: TextView, index: Int) {
+            val d = devices.getOrNull(index)
+            if (d == null) {
+                view.text = "● Фара не вибрана"
+                view.setTextColor(stateColor(UiLinkState.OFFLINE))
+                return
+            }
+            val state = stateByMac[d.mac] ?: UiLinkState.OFFLINE
+            val status = statusByMac[d.mac] ?: when (state) {
+                UiLinkState.CONNECTED -> "підключено"
+                UiLinkState.CONNECTING -> "підключення…"
+                UiLinkState.OFFLINE -> "немає з'єднання"
+            }
+            view.text = "● ${prefs.lampDisplayName(d)}\n$status"
+            view.setTextColor(stateColor(state))
         }
-        tvLamp1.text = textFor(0)
-        tvLamp2.text = textFor(1)
+        apply(tvLamp1, 0)
+        apply(tvLamp2, 1)
+    }
+
+    private fun retryLamp(index: Int) {
+        val d = prefs.devices().getOrNull(index) ?: return
+        if (stateByMac[d.mac] == UiLinkState.CONNECTED) return
+        stateByMac[d.mac] = UiLinkState.CONNECTING
+        statusByMac[d.mac] = "підключення…"
+        updateLampCards()
+        ControlDispatcher.connectDevice(this, d.mac)
+    }
+
+    private fun retryHubConnection() {
+        if (prefs.role() == BlePrefs.Role.HUB || RemoteLinkService.connected) return
+        setHubStatus(UiLinkState.CONNECTING, "Магнітола • підключення…")
+        RemoteLinkService.start(this)
+    }
+
+    private fun applyLampEvent(mac: String, type: String, message: String) {
+        val previous = stateByMac[mac]
+        when (type) {
+            QStarBleService.EVENT_READY -> {
+                stateByMac[mac] = UiLinkState.CONNECTED
+                statusByMac[mac] = "підключено"
+            }
+            QStarBleService.EVENT_RSSI -> {
+                if (previous == UiLinkState.CONNECTED) statusByMac[mac] = "підключено • $message"
+            }
+            QStarBleService.EVENT_DISCONNECTED, QStarBleService.EVENT_ERROR -> {
+                stateByMac[mac] = UiLinkState.OFFLINE
+                statusByMac[mac] = "немає з'єднання"
+            }
+            QStarBleService.EVENT_PHASE -> {
+                if (message == "READY") {
+                    stateByMac[mac] = UiLinkState.CONNECTED
+                    statusByMac[mac] = "підключено"
+                } else if (message in setOf("CONNECTING", "DISCOVERING", "SUBSCRIBING", "HANDSHAKE")) {
+                    stateByMac[mac] = UiLinkState.CONNECTING
+                    statusByMac[mac] = "підключення…"
+                }
+            }
+        }
+        updateLampCards()
     }
 
     private fun showDevicePicker() {
@@ -782,14 +850,7 @@ class MainActivity : AppCompatActivity() {
                     QStarBleService.EVENT_ERROR,
                     QStarBleService.EVENT_DISCONNECTED
                 )) {
-                statusByMac[mac] = when (type) {
-                    QStarBleService.EVENT_READY -> "● підключено"
-                    QStarBleService.EVENT_RSSI -> msg
-                    QStarBleService.EVENT_DISCONNECTED -> "○ від'єднано"
-                    QStarBleService.EVENT_ERROR -> "! $msg"
-                    else -> msg
-                }
-                updateLampCards()
+                applyLampEvent(mac, type, msg)
             }
             when (type) {
                 QStarBleService.EVENT_STROBE -> {
@@ -813,12 +874,22 @@ class MainActivity : AppCompatActivity() {
             val msg = intent.getStringExtra(RemoteLinkService.EXTRA_MESSAGE).orEmpty()
             val host = intent.getStringExtra(RemoteLinkService.EXTRA_HOST).orEmpty()
             val raw = intent.getStringExtra(RemoteLinkService.EXTRA_RAW)
-            if (type == RemoteLinkService.EVENT_CONNECTED) {
-                tvRemoteStatus.text = "Online • $host"
-                tvLinkStatus.text = "Магнітола online"
-            } else if (type == RemoteLinkService.EVENT_DISCONNECTED) {
-                tvRemoteStatus.text = "Offline • ${if (host.isBlank()) "пошук" else host}"
-                tvLinkStatus.text = "Зв'язок з магнітолою втрачено"
+            when (type) {
+                RemoteLinkService.EVENT_CONNECTING ->
+                    setHubStatus(UiLinkState.CONNECTING, "Магнітола • підключення…")
+                RemoteLinkService.EVENT_CONNECTED ->
+                    setHubStatus(UiLinkState.CONNECTED, "Магнітола • підключено" + if (host.isBlank()) "" else " • $host")
+                RemoteLinkService.EVENT_DISCONNECTED, RemoteLinkService.EVENT_ERROR ->
+                    setHubStatus(UiLinkState.OFFLINE, "Магнітола • немає з'єднання")
+            }
+            if (type == RemoteLinkService.EVENT_HUB_BLE && raw != null) {
+                try {
+                    val json = JSONObject(raw)
+                    val lampMac = json.optString("mac")
+                    val lampEvent = json.optString("event")
+                    val lampMessage = json.optString("message")
+                    if (lampMac.isNotBlank()) applyLampEvent(lampMac, lampEvent, lampMessage)
+                } catch (_: Throwable) { }
             }
             if (type == RemoteLinkService.EVENT_HUB_STATUS && raw != null) {
                 try {
