@@ -60,6 +60,8 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
     private var rssiLoop = false
     private var hubTransport: HubTransport? = null
     private var remoteTakeover = false
+    private var startupPending = true
+    private var phoneStopRunnable: Runnable? = null
 
     private var strobeActive = false
     private var strobeGeneration = 0L
@@ -71,6 +73,9 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         createNotificationChannel()
         if (prefs.role() == BlePrefs.Role.HUB) {
             hubTransport = HubTransport(this, prefs, this)
+            startupPending = true
+        } else if (prefs.phoneSessionActive()) {
+            schedulePhoneSessionStop()
         }
     }
 
@@ -78,12 +83,21 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent == null) {
+            if (prefs.role() == BlePrefs.Role.PHONE && !prefs.phoneSessionActive()) {
+                stopSelf()
+                return START_NOT_STICKY
+            }
             interactive = true
             oneShot = false
             startForegroundSafe(if (prefs.role() == BlePrefs.Role.HUB) "Магнітола • QStar hub" else "Прямий BLE • QStar")
-            if (prefs.role() == BlePrefs.Role.HUB) ensureHubTransport()
+            if (prefs.role() == BlePrefs.Role.HUB) ensureHubTransport() else schedulePhoneSessionStop()
             if (!remoteTakeover) ensureConnections()
-            return START_STICKY
+            return if (prefs.role() == BlePrefs.Role.HUB) START_STICKY else START_NOT_STICKY
+        }
+
+        if (prefs.role() == BlePrefs.Role.PHONE && intent.action != ACTION_RELEASE) {
+            if (!prefs.phoneSessionActive()) prefs.beginPhoneSession()
+            schedulePhoneSessionStop()
         }
         when (intent.action) {
             ACTION_SCAN -> {
@@ -103,6 +117,13 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
                 startForegroundSafe(if (prefs.role() == BlePrefs.Role.HUB) "Магнітола • QStar" else "Прямий BLE • QStar")
                 if (prefs.role() == BlePrefs.Role.HUB) ensureHubTransport()
                 if (!remoteTakeover) ensureConnections()
+            }
+            ACTION_CONNECT_DEVICE -> {
+                interactive = true
+                oneShot = false
+                startForegroundSafe(if (prefs.role() == BlePrefs.Role.HUB) "Магнітола • QStar" else "Прямий BLE • QStar")
+                if (prefs.role() == BlePrefs.Role.HUB) ensureHubTransport()
+                intent.getStringExtra(EXTRA_MAC)?.let { ensureDevice(it) }
             }
             ACTION_RELEASE -> {
                 stopStrobeInternal(restore = false)
@@ -171,11 +192,12 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
                     oneShot = true
                 }
                 bootPending = true
+                startupPending = true
                 startForegroundSafe("Відновлення QStar")
                 startScan(4_000) { if (!remoteTakeover) ensureConnections() }
             }
         }
-        return if (interactive && !oneShot) START_STICKY else START_NOT_STICKY
+        return if (prefs.role() == BlePrefs.Role.HUB && interactive && !oneShot) START_STICKY else START_NOT_STICKY
     }
 
     private fun ensureHubTransport() {
@@ -318,6 +340,15 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
 
     private var pendingAfterReady: (() -> Unit)? = null
 
+    private fun ensureDevice(mac: String) {
+        val ref = prefs.devices().firstOrNull { it.mac.equals(mac, true) } ?: return
+        val current = connections[ref.mac]
+        if (current?.isReady() == true || connectingMac == ref.mac || connectPlan.any { it.mac == ref.mac }) return
+        connectPlan.addFirst(ref)
+        pumpConnectPlan()
+        scheduleReconnect(250)
+    }
+
     private fun allSelectedReady(): Boolean {
         val refs = prefs.devices()
         return refs.isNotEmpty() && refs.all { connections[it.mac]?.isReady() == true }
@@ -373,6 +404,10 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
     }
 
     private fun scheduleReconnect(delayMs: Long = 1200L) {
+        if (prefs.role() == BlePrefs.Role.PHONE && !prefs.phoneSessionActive()) {
+            stopPhoneBleSession()
+            return
+        }
         if (reconnectScheduled || remoteTakeover) return
         val needed = interactive || bootPending || oneShot || latestCct != null || pendingAfterReady != null
         if (!needed) return
@@ -404,8 +439,13 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         }
         reconnectRounds = 0
         pairWasReady = true
-        if (bootPending) {
+        if (prefs.role() == BlePrefs.Role.PHONE) {
+            prefs.beginPhoneSession()
+            schedulePhoneSessionStop()
+        }
+        if (prefs.role() == BlePrefs.Role.HUB && (bootPending || startupPending)) {
             bootPending = false
+            startupPending = false
             runBootRoutine()
             return
         }
@@ -763,7 +803,40 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         handler.post(task)
     }
 
+    private fun schedulePhoneSessionStop() {
+        if (prefs.role() != BlePrefs.Role.PHONE) return
+        phoneStopRunnable?.let(handler::removeCallbacks)
+        val task = object : Runnable {
+            override fun run() {
+                val remaining = prefs.phoneSessionUntil - System.currentTimeMillis()
+                if (remaining > 0L) {
+                    handler.postDelayed(this, remaining.coerceAtMost(BlePrefs.PHONE_SESSION_MS))
+                } else {
+                    stopPhoneBleSession()
+                }
+            }
+        }
+        phoneStopRunnable = task
+        val delay = (prefs.phoneSessionUntil - System.currentTimeMillis()).coerceAtLeast(1_000L)
+        handler.postDelayed(task, delay)
+    }
+
+    private fun stopPhoneBleSession() {
+        if (prefs.role() != BlePrefs.Role.PHONE) return
+        interactive = false
+        oneShot = false
+        reconnectScheduled = false
+        stopStrobeInternal(restore = false)
+        disconnectAll()
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
     private fun shutdownSoon() {
+        if (prefs.role() == BlePrefs.Role.PHONE) {
+            schedulePhoneSessionStop()
+            return
+        }
         if (prefs.role() == BlePrefs.Role.HUB && interactive && !remoteTakeover) return
         handler.postDelayed({
             if (!interactive || oneShot) {
@@ -821,6 +894,14 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         val wasReady = readyMacs.remove(mac)
         if (connectingMac == mac) connectingMac = null
         if ((wasReady || pairWasReady) && !remoteTakeover) activateSafetyFallback("disconnect:$status")
+        if (prefs.role() == BlePrefs.Role.HUB && readyMacs.isEmpty()) {
+            handler.postDelayed({
+                if (readyMacs.isEmpty()) {
+                    startupPending = true
+                    pairWasReady = false
+                }
+            }, 4_000)
+        }
         if (!remoteTakeover) scheduleReconnect(120)
     }
 
@@ -909,6 +990,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
                     if (enabled) startStrobe() else stopStrobeInternal(restore = true)
                 }
                 ControlDispatcher.CMD_CONNECT -> ensureConnections()
+                ControlDispatcher.CMD_CONNECT_DEVICE -> payload.optString("mac").takeIf { it.isNotBlank() }?.let(::ensureDevice)
             }
             hubTransport?.publishStatus("Команда з телефону")
         }
@@ -959,6 +1041,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         const val ACTION_HUB_START = "ua.grey.qstarlight.HUB_START"
         const val ACTION_SCAN = "ua.grey.qstarlight.SCAN"
         const val ACTION_CONNECT = "ua.grey.qstarlight.CONNECT"
+        const val ACTION_CONNECT_DEVICE = "ua.grey.qstarlight.CONNECT_DEVICE"
         const val ACTION_RELEASE = "ua.grey.qstarlight.RELEASE"
         const val ACTION_APPLY = "ua.grey.qstarlight.APPLY"
         const val ACTION_POWER = "ua.grey.qstarlight.POWER"
