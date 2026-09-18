@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.widget.RemoteViews
+import ua.grey.qstarlight.MainActivity
 import ua.grey.qstarlight.R
 import ua.grey.qstarlight.ble.BlePrefs
 import ua.grey.qstarlight.control.ControlActionReceiver
@@ -22,7 +23,36 @@ class QStarWidgetProvider : AppWidgetProvider() {
                 prefs.white >= 85 -> "Білий"
                 else -> "Теплий"
             }
-            views.setTextViewText(R.id.widgetStatus, "$colorName • ${prefs.brightness}%")
+            views.setTextViewText(R.id.widgetStatus, "$colorName • \${prefs.brightness}%")
+            views.setOnClickPendingIntent(R.id.widgetRoot, openAppIntent(context))
+
+            val devices = prefs.devices()
+            val left = devices.firstOrNull {
+                it.name.equals(BlePrefs.LEFT_NAME, true) || it.mac.equals(BlePrefs.LEFT_DEFAULT_MAC, true)
+            }
+            val right = devices.firstOrNull {
+                it.name.equals(BlePrefs.RIGHT_NAME, true) || it.mac.equals(BlePrefs.RIGHT_DEFAULT_MAC, true)
+            }
+            val hubState = if (prefs.role() == BlePrefs.Role.HUB) {
+                BlePrefs.RuntimeLinkState.CONNECTED
+            } else {
+                prefs.hubRuntimeState
+            }
+
+            applyLink(views, R.id.widgetHubLink, "МАФОН", hubState)
+            applyLink(
+                views,
+                R.id.widgetLeftLink,
+                "ЛІВА",
+                left?.let { prefs.lampRuntimeState(it.mac) } ?: BlePrefs.RuntimeLinkState.OFFLINE
+            )
+            applyLink(
+                views,
+                R.id.widgetRightLink,
+                "ПРАВА",
+                right?.let { prefs.lampRuntimeState(it.mac) } ?: BlePrefs.RuntimeLinkState.OFFLINE
+            )
+
             views.setOnClickPendingIntent(R.id.widgetYellow, presetIntent(context, 0, 2))
             views.setOnClickPendingIntent(R.id.widgetWarm, presetIntent(context, 50, 3))
             views.setOnClickPendingIntent(R.id.widgetWhite, presetIntent(context, 100, 4))
@@ -36,11 +66,37 @@ class QStarWidgetProvider : AppWidgetProvider() {
                 val value = (index + 1) * 10
                 views.setOnClickPendingIntent(viewId, brightnessIntent(context, value, 20 + index))
                 val active = value <= prefs.brightness
-                views.setTextColor(viewId, if (active) Color.rgb(255, 200, 74) else Color.rgb(65, 77, 92))
+                views.setTextColor(
+                    viewId,
+                    if (active) Color.rgb(255, 196, 64) else Color.rgb(51, 63, 78)
+                )
             }
             manager.updateAppWidget(id, views)
         }
     }
+
+    private fun applyLink(
+        views: RemoteViews,
+        viewId: Int,
+        label: String,
+        state: BlePrefs.RuntimeLinkState
+    ) {
+        val (dot, color) = when (state) {
+            BlePrefs.RuntimeLinkState.CONNECTED -> "●" to Color.rgb(65, 214, 126)
+            BlePrefs.RuntimeLinkState.CONNECTING -> "●" to Color.rgb(255, 190, 54)
+            BlePrefs.RuntimeLinkState.OFFLINE -> "●" to Color.rgb(255, 79, 94)
+        }
+        views.setTextViewText(viewId, "$dot $label")
+        views.setTextColor(viewId, color)
+    }
+
+    private fun openAppIntent(context: Context): PendingIntent =
+        PendingIntent.getActivity(
+            context,
+            7999,
+            Intent(context, MainActivity::class.java),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
 
     private fun presetIntent(context: Context, white: Int, request: Int): PendingIntent {
         val i = Intent(context, ControlActionReceiver::class.java)
