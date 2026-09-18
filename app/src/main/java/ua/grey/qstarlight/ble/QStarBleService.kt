@@ -135,7 +135,12 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
                 } else {
                     interactive = false
                     disconnectAll()
-                    if (!prefs.keepConnected || prefs.role() == BlePrefs.Role.PHONE) shutdownSoon()
+                    if (prefs.role() == BlePrefs.Role.PHONE) {
+                        stopForeground(STOP_FOREGROUND_REMOVE)
+                        stopSelf()
+                        return START_NOT_STICKY
+                    }
+                    if (!prefs.keepConnected) shutdownSoon()
                 }
             }
             ACTION_APPLY -> {
