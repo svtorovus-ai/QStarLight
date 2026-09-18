@@ -698,7 +698,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun retryLamp(index: Int) {
         val d = prefs.devices().getOrNull(index) ?: return
-        if (stateByMac[d.mac] == UiLinkState.CONNECTED) return
+        val live = stateByMac[d.mac] == UiLinkState.CONNECTED ||
+            prefs.lampRuntimeState(d.mac) == BlePrefs.RuntimeLinkState.CONNECTED
+        if (live) return
         stateByMac[d.mac] = UiLinkState.CONNECTING
         statusByMac[d.mac] = "підключення…"
         updateLampCards()
@@ -706,7 +708,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun retryHubConnection() {
-        if (prefs.role() == BlePrefs.Role.HUB || RemoteLinkService.connected) return
+        if (prefs.role() == BlePrefs.Role.HUB ||
+            RemoteLinkService.connected ||
+            prefs.hubRuntimeState == BlePrefs.RuntimeLinkState.CONNECTED) return
         setHubStatus(UiLinkState.CONNECTING, "Магнітола • підключення…")
         RemoteLinkService.start(this)
     }
