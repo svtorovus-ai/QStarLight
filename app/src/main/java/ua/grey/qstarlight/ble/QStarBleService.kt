@@ -29,6 +29,7 @@ import ua.grey.qstarlight.R
 import ua.grey.qstarlight.control.ControlActionReceiver
 import ua.grey.qstarlight.control.ControlDispatcher
 import ua.grey.qstarlight.remote.HubTransport
+import ua.grey.qstarlight.widget.QStarWidgetProvider
 import java.util.ArrayDeque
 import java.util.LinkedHashMap
 
@@ -74,8 +75,8 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         if (prefs.role() == BlePrefs.Role.HUB) {
             hubTransport = HubTransport(this, prefs, this)
             startupPending = true
-        } else if (prefs.phoneSessionActive()) {
-            schedulePhoneSessionStop()
+        } else {
+            reconcilePhoneLifetime()
         }
     }
 
@@ -83,21 +84,23 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent == null) {
-            if (prefs.role() == BlePrefs.Role.PHONE && !prefs.phoneSessionActive()) {
+            if (prefs.role() == BlePrefs.Role.PHONE &&
+                !prefs.anyPhoneLinkConnected() &&
+                !prefs.phoneOfflineGraceActive()) {
                 stopSelf()
                 return START_NOT_STICKY
             }
             interactive = true
             oneShot = false
             startForegroundSafe(if (prefs.role() == BlePrefs.Role.HUB) "Магнітола • QStar hub" else "Прямий BLE • QStar")
-            if (prefs.role() == BlePrefs.Role.HUB) ensureHubTransport() else schedulePhoneSessionStop()
+            if (prefs.role() == BlePrefs.Role.HUB) ensureHubTransport() else reconcilePhoneLifetime()
             if (!remoteTakeover) ensureConnections()
             return if (prefs.role() == BlePrefs.Role.HUB) START_STICKY else START_NOT_STICKY
         }
 
         if (prefs.role() == BlePrefs.Role.PHONE && intent.action != ACTION_RELEASE) {
-            if (!prefs.phoneSessionActive()) prefs.beginPhoneSession()
-            schedulePhoneSessionStop()
+            if (!prefs.anyPhoneLinkConnected() && !prefs.phoneOfflineGraceActive()) prefs.startPhoneOfflineGrace()
+            reconcilePhoneLifetime()
         }
         when (intent.action) {
             ACTION_SCAN -> {
@@ -404,7 +407,9 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
     }
 
     private fun scheduleReconnect(delayMs: Long = 1200L) {
-        if (prefs.role() == BlePrefs.Role.PHONE && !prefs.phoneSessionActive()) {
+        if (prefs.role() == BlePrefs.Role.PHONE &&
+            !prefs.anyPhoneLinkConnected() &&
+            !prefs.phoneOfflineGraceActive()) {
             stopPhoneBleSession()
             return
         }
@@ -440,8 +445,8 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         reconnectRounds = 0
         pairWasReady = true
         if (prefs.role() == BlePrefs.Role.PHONE) {
-            prefs.beginPhoneSession()
-            schedulePhoneSessionStop()
+            prefs.markPhoneLinkAvailable()
+            reconcilePhoneLifetime()
         }
         if (prefs.role() == BlePrefs.Role.HUB && (bootPending || startupPending)) {
             bootPending = false
@@ -803,26 +808,42 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         handler.post(task)
     }
 
-    private fun schedulePhoneSessionStop() {
+    private fun reconcilePhoneLifetime() {
         if (prefs.role() != BlePrefs.Role.PHONE) return
         phoneStopRunnable?.let(handler::removeCallbacks)
-        val task = object : Runnable {
-            override fun run() {
-                val remaining = prefs.phoneSessionUntil - System.currentTimeMillis()
-                if (remaining > 0L) {
-                    handler.postDelayed(this, remaining.coerceAtMost(BlePrefs.PHONE_SESSION_MS))
-                } else {
-                    stopPhoneBleSession()
-                }
+        phoneStopRunnable = null
+
+        if (prefs.anyPhoneLinkConnected()) {
+            prefs.clearPhoneOfflineGrace()
+            return
+        }
+
+        val until = prefs.startPhoneOfflineGrace()
+        val remaining = until - System.currentTimeMillis()
+        if (remaining <= 0L) {
+            stopPhoneBleSession()
+            return
+        }
+
+        val task = Runnable {
+            if (prefs.anyPhoneLinkConnected()) {
+                prefs.clearPhoneOfflineGrace()
+                return@Runnable
+            }
+            if (prefs.phoneOfflineGraceActive()) {
+                reconcilePhoneLifetime()
+            } else {
+                stopPhoneBleSession()
             }
         }
         phoneStopRunnable = task
-        val delay = (prefs.phoneSessionUntil - System.currentTimeMillis()).coerceAtLeast(1_000L)
-        handler.postDelayed(task, delay)
+        handler.postDelayed(task, remaining.coerceAtLeast(1_000L))
     }
 
     private fun stopPhoneBleSession() {
         if (prefs.role() != BlePrefs.Role.PHONE) return
+        if (prefs.anyPhoneLinkConnected()) return
+        prefs.clearPhoneOfflineGrace()
         interactive = false
         oneShot = false
         reconnectScheduled = false
@@ -834,7 +855,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
 
     private fun shutdownSoon() {
         if (prefs.role() == BlePrefs.Role.PHONE) {
-            schedulePhoneSessionStop()
+            reconcilePhoneLifetime()
             return
         }
         if (prefs.role() == BlePrefs.Role.HUB && interactive && !remoteTakeover) return
@@ -849,6 +870,20 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
     }
 
     override fun onPhase(mac: String, phase: LampConnection.Phase) {
+        if (prefs.role() == BlePrefs.Role.PHONE) {
+            val state = when (phase) {
+                LampConnection.Phase.READY -> BlePrefs.RuntimeLinkState.CONNECTED
+                LampConnection.Phase.CONNECTING,
+                LampConnection.Phase.DISCOVERING,
+                LampConnection.Phase.SUBSCRIBING,
+                LampConnection.Phase.HANDSHAKE -> BlePrefs.RuntimeLinkState.CONNECTING
+                LampConnection.Phase.DISCONNECTED,
+                LampConnection.Phase.ERROR -> BlePrefs.RuntimeLinkState.OFFLINE
+            }
+            prefs.setLampRuntimeState(mac, state)
+            if (state == BlePrefs.RuntimeLinkState.CONNECTED) prefs.markPhoneLinkAvailable()
+            QStarWidgetProvider.refresh(this)
+        }
         event(EVENT_PHASE, mac, connections[mac]?.name, phase.name)
     }
 
@@ -856,8 +891,10 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         event(EVENT_READY, mac, connections[mac]?.name, "ready")
         readyMacs.add(mac)
         if (prefs.role() == BlePrefs.Role.PHONE) {
-            prefs.beginPhoneSession()
-            schedulePhoneSessionStop()
+            prefs.setLampRuntimeState(mac, BlePrefs.RuntimeLinkState.CONNECTED)
+            prefs.markPhoneLinkAvailable()
+            reconcilePhoneLifetime()
+            QStarWidgetProvider.refresh(this)
         }
         if (connectingMac == mac) connectingMac = null
         val connection = connections[mac]
@@ -886,6 +923,11 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
     }
 
     override fun onError(mac: String, message: String) {
+        if (prefs.role() == BlePrefs.Role.PHONE) {
+            prefs.setLampRuntimeState(mac, BlePrefs.RuntimeLinkState.OFFLINE)
+            reconcilePhoneLifetime()
+            QStarWidgetProvider.refresh(this)
+        }
         event(EVENT_ERROR, mac, connections[mac]?.name, message)
         val wasReady = readyMacs.remove(mac)
         if (connectingMac == mac) connectingMac = null
@@ -894,6 +936,11 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
     }
 
     override fun onDisconnected(mac: String, status: Int) {
+        if (prefs.role() == BlePrefs.Role.PHONE) {
+            prefs.setLampRuntimeState(mac, BlePrefs.RuntimeLinkState.OFFLINE)
+            reconcilePhoneLifetime()
+            QStarWidgetProvider.refresh(this)
+        }
         event(EVENT_DISCONNECTED, mac, connections[mac]?.name, "status=$status")
         val wasReady = readyMacs.remove(mac)
         if (connectingMac == mac) connectingMac = null
