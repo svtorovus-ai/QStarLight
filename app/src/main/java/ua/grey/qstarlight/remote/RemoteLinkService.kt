@@ -52,6 +52,8 @@ class RemoteLinkService : Service() {
     @Volatile private var pendingConfigRevision: Long? = null
     @Volatile private var pendingConfigJson: JSONObject? = null
     @Volatile private var configRetryScheduled = false
+    @Volatile private var autoLampWake = false
+    private var sessionStopRunnable: Runnable? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -70,6 +72,13 @@ class RemoteLinkService : Service() {
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
                 return START_NOT_STICKY
+            }
+            ACTION_AUTO_WAKE -> {
+                if (!prefs.phoneSessionActive()) prefs.beginPhoneSession()
+                autoLampWake = intent.getBooleanExtra(EXTRA_FROM_LAMP, false)
+                scheduleSessionStop()
+                startForegroundSafe()
+                ensureLoop()
             }
             ACTION_ROUTE_CHANGED -> {
                 startForegroundSafe()
@@ -92,11 +101,13 @@ class RemoteLinkService : Service() {
                 pushSelfUpdate(manual = true)
             }
             else -> {
+                if (!prefs.phoneSessionActive()) prefs.beginPhoneSession()
+                scheduleSessionStop()
                 startForegroundSafe()
                 ensureLoop()
             }
         }
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     override fun onDestroy() {
@@ -107,6 +118,7 @@ class RemoteLinkService : Service() {
         pendingConfigRevision = null
         pendingConfigJson = null
         configRetryScheduled = false
+        sessionStopRunnable = null
         handler.removeCallbacksAndMessages(null)
         super.onDestroy()
     }
@@ -118,17 +130,24 @@ class RemoteLinkService : Service() {
 
     private fun connectionLoop() {
         while (running.get()) {
+            if (!prefs.phoneSessionActive()) {
+                running.set(false)
+                break
+            }
             if (prefs.role() != BlePrefs.Role.PHONE) {
                 running.set(false)
                 break
             }
+            broadcast(EVENT_CONNECTING, "Пошук магнітоли…")
             val host = chooseHost()
             if (host == null) {
                 setConnected(false, "Магнітолу не знайдено")
+                if (autoLampWake || prefs.forceDirect || prefs.directFallback) startDirectBle()
                 sleepQuiet(2200)
                 continue
             }
             try {
+                broadcast(EVENT_CONNECTING, "Підключення до магнітоли…", host)
                 val s = Socket()
                 s.connect(InetSocketAddress(host, COMMAND_PORT), 1800)
                 s.soTimeout = 5000
@@ -159,6 +178,7 @@ class RemoteLinkService : Service() {
                 prefs.lastHubHost = host
                 hubVersionCode = helloJson.optLong("versionCode", -1L)
                 setConnected(true, "Магнітола online", host)
+                autoLampWake = false
 
                 // Exchange synchronized settings immediately after authorization.
                 sendConfigNow()
@@ -311,6 +331,7 @@ class RemoteLinkService : Service() {
             if (intent.hasExtra(EXTRA_POWER)) json.put("power", intent.getBooleanExtra(EXTRA_POWER, prefs.power))
             if (intent.hasExtra(EXTRA_DELTA)) json.put("delta", intent.getIntExtra(EXTRA_DELTA, 0))
             if (intent.hasExtra(EXTRA_STROBE)) json.put("enabled", intent.getBooleanExtra(EXTRA_STROBE, false))
+            if (intent.hasExtra(EXTRA_MAC)) json.put("mac", intent.getStringExtra(EXTRA_MAC))
             sendLine(json)
             broadcast(EVENT_ROUTE, "Команда через магнітолу", currentHost)
         } else if (prefs.directFallback) {
@@ -342,6 +363,11 @@ class RemoteLinkService : Service() {
                 QStarBleService.start(this, i)
             }
             ControlDispatcher.CMD_CONNECT -> startDirectBle()
+            ControlDispatcher.CMD_CONNECT_DEVICE -> QStarBleService.start(
+                this,
+                Intent().setAction(QStarBleService.ACTION_CONNECT_DEVICE)
+                    .putExtra(QStarBleService.EXTRA_MAC, intent.getStringExtra(EXTRA_MAC))
+            )
         }
     }
 
@@ -485,8 +511,33 @@ class RemoteLinkService : Service() {
         }
     }
 
+    private fun scheduleSessionStop() {
+        sessionStopRunnable?.let(handler::removeCallbacks)
+        val task = object : Runnable {
+            override fun run() {
+                val remaining = prefs.phoneSessionUntil - System.currentTimeMillis()
+                if (remaining > 0L) {
+                    handler.postDelayed(this, remaining.coerceAtMost(BlePrefs.PHONE_SESSION_MS))
+                    return
+                }
+                running.set(false)
+                closeSocket()
+                QStarBleService.start(this@RemoteLinkService, Intent().setAction(QStarBleService.ACTION_RELEASE))
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            }
+        }
+        sessionStopRunnable = task
+        val delay = (prefs.phoneSessionUntil - System.currentTimeMillis()).coerceAtLeast(1_000L)
+        handler.postDelayed(task, delay)
+    }
+
     private fun setConnected(value: Boolean, message: String, host: String? = null) {
         connected = value
+        if (value && prefs.role() == BlePrefs.Role.PHONE) {
+            prefs.beginPhoneSession()
+            scheduleSessionStop()
+        }
         broadcast(if (value) EVENT_CONNECTED else EVENT_DISCONNECTED, message, host)
         updateNotification(message)
     }
@@ -557,6 +608,7 @@ class RemoteLinkService : Service() {
         const val RESPONSE_MAGIC = "QSTAR_HUB_V1"
 
         const val ACTION_START = "ua.grey.qstarlight.remote.START"
+        const val ACTION_AUTO_WAKE = "ua.grey.qstarlight.remote.AUTO_WAKE"
         const val ACTION_STOP = "ua.grey.qstarlight.remote.STOP"
         const val ACTION_COMMAND = "ua.grey.qstarlight.remote.COMMAND"
         const val ACTION_ROUTE_CHANGED = "ua.grey.qstarlight.remote.ROUTE_CHANGED"
@@ -576,7 +628,10 @@ class RemoteLinkService : Service() {
         const val EXTRA_CONNECTED = "connected"
         const val EXTRA_RAW = "raw"
         const val EXTRA_HUB_VERSION = "hub_version"
+        const val EXTRA_MAC = "mac"
+        const val EXTRA_FROM_LAMP = "from_lamp"
 
+        const val EVENT_CONNECTING = "connecting"
         const val EVENT_CONNECTED = "connected"
         const val EVENT_DISCONNECTED = "disconnected"
         const val EVENT_DISCOVERED = "discovered"
@@ -609,6 +664,15 @@ class RemoteLinkService : Service() {
             launch(context, Intent(context, RemoteLinkService::class.java).setAction(ACTION_START))
         }
 
+        fun startAuto(context: Context, fromLamp: Boolean) {
+            launch(
+                context,
+                Intent(context, RemoteLinkService::class.java)
+                    .setAction(ACTION_AUTO_WAKE)
+                    .putExtra(EXTRA_FROM_LAMP, fromLamp)
+            )
+        }
+
         fun stop(context: Context) {
             try { context.startService(Intent(context, RemoteLinkService::class.java).setAction(ACTION_STOP)) }
             catch (_: Throwable) { }
@@ -633,7 +697,8 @@ class RemoteLinkService : Service() {
             brightness: Int? = null,
             power: Boolean? = null,
             delta: Int? = null,
-            strobe: Boolean? = null
+            strobe: Boolean? = null,
+            mac: String? = null
         ) {
             val i = Intent(context, RemoteLinkService::class.java).setAction(ACTION_COMMAND)
                 .putExtra(EXTRA_COMMAND, command)
@@ -642,6 +707,7 @@ class RemoteLinkService : Service() {
             power?.let { i.putExtra(EXTRA_POWER, it) }
             delta?.let { i.putExtra(EXTRA_DELTA, it) }
             strobe?.let { i.putExtra(EXTRA_STROBE, it) }
+            mac?.let { i.putExtra(EXTRA_MAC, it) }
             launch(context, i)
         }
     }
