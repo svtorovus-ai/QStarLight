@@ -1,16 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="bg">#05070B</color>
-    <color name="surface">#121923</color>
-    <color name="surface_soft">#0B1119</color>
-    <color name="text">#F5F7FA</color>
-    <color name="muted">#7E8A9A</color>
-    <color name="accent">#FFC94A</color>
-    <color name="accent_warm">#FFE0A0</color>
-    <color name="ice">#FAFCFF</color>
-    <color name="stroke">#2E3B4B</color>
-    <color name="log_text">#A7B5C5</color>
-    <color name="status_ok">#41D67E</color>
-    <color name="status_wait">#FFBE36</color>
-    <color name="status_bad">#FF4F5E</color>
+    <color name="bg">#020306</color>
+    <color name="surface">#0B1119</color>
+    <color name="surface_soft">#060A10</color>
+    <color name="text">#F4F8FA</color>
+    <color name="muted">#70808F</color>
+    <color name="accent">#39D6E5</color>
+    <color name="accent_warm">#FFC857</color>
+    <color name="ice">#F8FCFF</color>
+    <color name="stroke">#213441</color>
+    <color name="log_text">#8FA5B6</color>
+    <color name="status_ok">#41E18D</color>
+    <color name="status_wait">#FFC247</color>
+    <color name="status_bad">#FF5268</color>
+    <color name="neon_cyan">#39D6E5</color>
+    <color name="neon_blue">#4E7CFF</color>
+    <color name="neon_violet">#8C6CFF</color>
 </resources>
