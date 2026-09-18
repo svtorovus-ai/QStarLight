@@ -13,6 +13,7 @@ class ControlActionReceiver : BroadcastReceiver() {
             ACTION_BRIGHTNESS_SET -> ControlDispatcher.brightnessSet(context, intent.getIntExtra(EXTRA_BRIGHTNESS, 100))
             ACTION_STROBE -> ControlDispatcher.strobe(context, if (intent.hasExtra(EXTRA_STROBE)) intent.getBooleanExtra(EXTRA_STROBE, false) else null)
             ACTION_CONNECT -> ControlDispatcher.connect(context)
+            ACTION_CONNECT_DEVICE -> intent.getStringExtra(EXTRA_MAC)?.let { ControlDispatcher.connectDevice(context, it) }
         }
     }
 
@@ -23,10 +24,12 @@ class ControlActionReceiver : BroadcastReceiver() {
         const val ACTION_BRIGHTNESS_SET = "ua.grey.qstarlight.control.BRIGHTNESS_SET"
         const val ACTION_STROBE = "ua.grey.qstarlight.control.STROBE"
         const val ACTION_CONNECT = "ua.grey.qstarlight.control.CONNECT"
+        const val ACTION_CONNECT_DEVICE = "ua.grey.qstarlight.control.CONNECT_DEVICE"
         const val EXTRA_WHITE = "white"
         const val EXTRA_POWER = "power"
         const val EXTRA_DELTA = "delta"
         const val EXTRA_BRIGHTNESS = "brightness"
         const val EXTRA_STROBE = "strobe"
+        const val EXTRA_MAC = "mac"
     }
 }
