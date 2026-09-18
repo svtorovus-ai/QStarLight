@@ -456,6 +456,9 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         if (prefs.role() == BlePrefs.Role.HUB && (bootPending || startupPending)) {
             bootPending = false
             startupPending = false
+            // A real lamp power cycle must obey the configured startup profile, not the
+            // temporary white-100 failsafe used while a single lamp is missing.
+            safetyFallbackActive = false
             runBootRoutine()
             return
         }
