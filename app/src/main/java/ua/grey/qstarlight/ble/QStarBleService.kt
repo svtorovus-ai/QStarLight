@@ -880,8 +880,9 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
             LampConnection.Phase.ERROR -> BlePrefs.RuntimeLinkState.OFFLINE
         }
         prefs.setLampRuntimeState(mac, state)
-        if (prefs.role() == BlePrefs.Role.PHONE && state == BlePrefs.RuntimeLinkState.CONNECTED) {
-            prefs.markPhoneLinkAvailable()
+        if (prefs.role() == BlePrefs.Role.PHONE) {
+            prefs.setDirectLampRuntimeState(mac, state)
+            if (state == BlePrefs.RuntimeLinkState.CONNECTED) prefs.markPhoneLinkAvailable()
             reconcilePhoneLifetime()
         }
         QStarWidgetProvider.refresh(this)
@@ -893,6 +894,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         readyMacs.add(mac)
         prefs.setLampRuntimeState(mac, BlePrefs.RuntimeLinkState.CONNECTED)
         if (prefs.role() == BlePrefs.Role.PHONE) {
+            prefs.setDirectLampRuntimeState(mac, BlePrefs.RuntimeLinkState.CONNECTED)
             prefs.markPhoneLinkAvailable()
             reconcilePhoneLifetime()
         }
@@ -925,7 +927,10 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
 
     override fun onError(mac: String, message: String) {
         prefs.setLampRuntimeState(mac, BlePrefs.RuntimeLinkState.OFFLINE)
-        if (prefs.role() == BlePrefs.Role.PHONE) reconcilePhoneLifetime()
+        if (prefs.role() == BlePrefs.Role.PHONE) {
+            prefs.setDirectLampRuntimeState(mac, BlePrefs.RuntimeLinkState.OFFLINE)
+            reconcilePhoneLifetime()
+        }
         QStarWidgetProvider.refresh(this)
         event(EVENT_ERROR, mac, connections[mac]?.name, message)
         val wasReady = readyMacs.remove(mac)
@@ -940,7 +945,10 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
 
     override fun onDisconnected(mac: String, status: Int) {
         prefs.setLampRuntimeState(mac, BlePrefs.RuntimeLinkState.OFFLINE)
-        if (prefs.role() == BlePrefs.Role.PHONE) reconcilePhoneLifetime()
+        if (prefs.role() == BlePrefs.Role.PHONE) {
+            prefs.setDirectLampRuntimeState(mac, BlePrefs.RuntimeLinkState.OFFLINE)
+            reconcilePhoneLifetime()
+        }
         QStarWidgetProvider.refresh(this)
         event(EVENT_DISCONNECTED, mac, connections[mac]?.name, "status=$status")
         val wasReady = readyMacs.remove(mac)
