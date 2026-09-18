@@ -72,6 +72,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:background="@drawable/bg_card"
+                    android:elevation="5dp"
                     android:orientation="vertical"
                     android:padding="15dp">
                     <LinearLayout
@@ -84,7 +85,7 @@
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:text="Очікування магнітоли"
+                            android:text="● Магнітола • немає з’єднання"
                             android:textColor="@color/text"
                             android:textSize="17sp"
                             android:textStyle="bold" />
@@ -110,7 +111,7 @@
                             android:background="@drawable/bg_card_soft"
                             android:gravity="center_vertical"
                             android:padding="11dp"
-                            android:text="QStar~D35D\nочікування"
+                            android:text="Ліва фара • QStar~F072\nнемає з’єднання"
                             android:textColor="@color/text"
                             android:textSize="12sp" />
                         <Space android:layout_width="9dp" android:layout_height="1dp" />
@@ -122,7 +123,7 @@
                             android:background="@drawable/bg_card_soft"
                             android:gravity="center_vertical"
                             android:padding="11dp"
-                            android:text="QStar~F072\nочікування"
+                            android:text="Права фара • QStar~D35D\nнемає з’єднання"
                             android:textColor="@color/text"
                             android:textSize="12sp" />
                     </LinearLayout>
@@ -134,6 +135,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="11dp"
                     android:background="@drawable/bg_card"
+                    android:elevation="5dp"
                     android:orientation="vertical"
                     android:padding="13dp">
                     <TextView
@@ -175,6 +177,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="11dp"
                     android:background="@drawable/bg_card"
+                    android:elevation="5dp"
                     android:orientation="vertical"
                     android:padding="15dp">
 
@@ -281,6 +284,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="11dp"
                     android:background="@drawable/bg_card"
+                    android:elevation="5dp"
                     android:orientation="vertical"
                     android:padding="15dp">
                     <LinearLayout
@@ -349,6 +353,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:background="@drawable/bg_card"
+                    android:elevation="5dp"
                     android:orientation="vertical"
                     android:padding="15dp">
                     <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="РОЛЬ ЦЬОГО ПРИСТРОЮ" android:textColor="@color/muted" android:textSize="10sp" android:textStyle="bold" />
@@ -365,6 +370,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="11dp"
                     android:background="@drawable/bg_card"
+                    android:elevation="5dp"
                     android:orientation="vertical"
                     android:padding="15dp">
                     <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="ПІДКЛЮЧЕННЯ ТЕЛЕФОНА" android:textColor="@color/muted" android:textSize="10sp" android:textStyle="bold" />
@@ -378,6 +384,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="11dp"
                     android:background="@drawable/bg_card"
+                    android:elevation="5dp"
                     android:orientation="vertical"
                     android:padding="15dp">
                     <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="МАГНІТОЛА" android:textColor="@color/muted" android:textSize="10sp" android:textStyle="bold" />
@@ -395,6 +402,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="11dp"
                     android:background="@drawable/bg_card"
+                    android:elevation="5dp"
                     android:orientation="vertical"
                     android:padding="15dp">
                     <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="СИНХРОНІЗАЦІЯ ТА ОНОВЛЕННЯ" android:textColor="@color/muted" android:textSize="10sp" android:textStyle="bold" />
@@ -412,6 +420,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="11dp"
                     android:background="@drawable/bg_card"
+                    android:elevation="5dp"
                     android:orientation="vertical"
                     android:padding="15dp">
                     <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="СТАРТ ФАР" android:textColor="@color/muted" android:textSize="10sp" android:textStyle="bold" />
@@ -435,6 +444,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="11dp"
                     android:background="@drawable/bg_card"
+                    android:elevation="5dp"
                     android:orientation="vertical"
                     android:padding="15dp">
                     <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="⚡ МИГАЛКИ / СТРОБ" android:textColor="@color/accent" android:textSize="11sp" android:textStyle="bold" />
@@ -458,6 +468,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="11dp"
                     android:background="@drawable/bg_card"
+                    android:elevation="5dp"
                     android:orientation="vertical"
                     android:padding="15dp">
                     <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="ЛАМПИ QSTAR" android:textColor="@color/muted" android:textSize="10sp" android:textStyle="bold" />
@@ -474,6 +485,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="11dp"
                     android:background="@drawable/bg_card"
+                    android:elevation="5dp"
                     android:orientation="vertical"
                     android:padding="15dp">
                     <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="ШВИДКЕ КЕРУВАННЯ" android:textColor="@color/muted" android:textSize="10sp" android:textStyle="bold" />
@@ -485,6 +497,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="11dp"
                     android:background="@drawable/bg_card"
+                    android:elevation="5dp"
                     android:orientation="vertical"
                     android:padding="15dp">
                     <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="ДІАГНОСТИКА" android:textColor="@color/muted" android:textSize="10sp" android:textStyle="bold" />
