@@ -17,13 +17,14 @@ import org.robolectric.annotation.Config
 import java.time.Duration
 
 @RunWith(RobolectricTestRunner::class)
-@Config(application = Application::class, sdk = [28])
+@Config(application = Application::class, sdk = [28], qualifiers = "w400dp-h800dp-mdpi")
 class MainNavigationTest {
     private fun layout(activity: MainActivity) {
         val decor = activity.window.decorView
-        decor.measure(View.MeasureSpec.makeMeasureSpec(1080, View.MeasureSpec.EXACTLY),
-            View.MeasureSpec.makeMeasureSpec(1920, View.MeasureSpec.EXACTLY))
-        decor.layout(0, 0, 1080, 1920)
+        val metrics = activity.resources.displayMetrics
+        decor.measure(View.MeasureSpec.makeMeasureSpec(metrics.widthPixels, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(metrics.heightPixels, View.MeasureSpec.EXACTLY))
+        decor.layout(0, 0, metrics.widthPixels, metrics.heightPixels)
     }
 
     private fun settle() { shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(250)) }
@@ -74,11 +75,11 @@ class MainNavigationTest {
     }
 
     private fun swipeLeft(activity: MainActivity, view: View, yOffset: Float) {
-        val position = IntArray(2)
-        view.getLocationOnScreen(position)
-        val start = position[0] + view.width * 0.8f
-        val end = position[0] + view.width * 0.2f
-        val y = position[1] + yOffset
+        val visible = android.graphics.Rect()
+        assertTrue("Swipe target must be visible: ${view.id}, shown=${view.isShown}, size=${view.width}x${view.height}", view.getGlobalVisibleRect(visible))
+        val start = visible.left + visible.width() * 0.8f
+        val end = visible.left + visible.width() * 0.2f
+        val y = visible.top + yOffset.coerceAtMost(visible.height() - 1f)
         val now = SystemClock.uptimeMillis()
         listOf(Triple(MotionEvent.ACTION_DOWN, start, 0L),
             Triple(MotionEvent.ACTION_MOVE, end, 120L),
