@@ -15,6 +15,7 @@ import androidx.core.content.ContextCompat
 import ua.grey.qstarlight.ble.BlePrefs
 import ua.grey.qstarlight.ble.QStarBleService
 import ua.grey.qstarlight.remote.RemoteLinkService
+import ua.grey.qstarlight.update.UpdateScheduler
 
 object PresenceMonitor {
     const val ACTION_BLE_PRESENCE = "ua.grey.qstarlight.AUTO_BLE_PRESENCE"
@@ -55,6 +56,7 @@ object PresenceMonitor {
 class AutoWakeReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val prefs = BlePrefs(context).also { it.ensureDefaults() }
+        UpdateScheduler.ensure(context)
         when (intent.action) {
             PresenceMonitor.ACTION_BLE_PRESENCE -> {
                 if (prefs.role() == BlePrefs.Role.HUB) {
