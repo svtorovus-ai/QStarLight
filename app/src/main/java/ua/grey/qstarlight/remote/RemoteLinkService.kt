@@ -597,7 +597,16 @@ class RemoteLinkService : Service() {
         connected = value
         prefs.hubRuntimeState =
             if (value) BlePrefs.RuntimeLinkState.CONNECTED else BlePrefs.RuntimeLinkState.OFFLINE
-        if (value) prefs.markPhoneLinkAvailable() else if (!prefs.anyPhoneLinkConnected()) prefs.startPhoneOfflineGrace()
+        if (value) {
+            prefs.markPhoneLinkAvailable()
+        } else {
+            // Once HUB transport is gone, its last lamp state is no longer authoritative.
+            // Keep any direct-BLE lamp green; mark the rest offline until direct/HUB events arrive.
+            prefs.devices().forEach { d ->
+                prefs.setLampRuntimeState(d.mac, prefs.directLampRuntimeState(d.mac))
+            }
+            if (!prefs.anyPhoneLinkConnected()) prefs.startPhoneOfflineGrace()
+        }
         reconcilePhoneLifetime()
         QStarWidgetProvider.refresh(this)
         broadcast(if (value) EVENT_CONNECTED else EVENT_DISCONNECTED, message, host)
