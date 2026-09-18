@@ -737,7 +737,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         val items = found.values.toList()
-        val labels = items.map { "${it.name}\n${it.mac}" }.toTypedArray()
+        val labels = items.map { "${prefs.lampDisplayName(it)}\n${it.mac}" }.toTypedArray()
         val checked = BooleanArray(items.size) { item -> prefs.devices().any { it.mac == items[item].mac } }
         AlertDialog.Builder(this)
             .setTitle(R.string.choose_devices)
@@ -768,7 +768,7 @@ class MainActivity : AppCompatActivity() {
             setPadding(48, 12, 48, 0)
         }
         val fields = devices.map { d ->
-            val label = TextView(this).apply { text = d.name }
+            val label = TextView(this).apply { text = prefs.lampDisplayName(d) }
             val edit = EditText(this).apply {
                 inputType = android.text.InputType.TYPE_CLASS_NUMBER
                 setText(prefs.password(d.mac))
