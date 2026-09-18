@@ -53,6 +53,10 @@ jobs:
         if: ${{ env.QSTAR_KEYSTORE_B64 == '' }}
         run: gradle :app:assembleDebug --stacktrace
 
+      - name: Build unsigned release APK for one-time signer bootstrap
+        if: ${{ env.QSTAR_KEYSTORE_B64 == '' }}
+        run: gradle :app:assembleRelease --stacktrace
+
       - name: Build stable release APK
         if: ${{ env.QSTAR_KEYSTORE_B64 != '' }}
         env:
@@ -73,6 +77,13 @@ jobs:
         with:
           name: QStarLight-debug
           path: app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload unsigned release APK
+        if: ${{ env.QSTAR_KEYSTORE_B64 == '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: QStarLight-unsigned-release
+          path: app/build/outputs/apk/release/app-release-unsigned.apk
 
       - name: Upload stable release APK
         if: ${{ env.QSTAR_KEYSTORE_B64 != '' }}
