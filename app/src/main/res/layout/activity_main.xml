@@ -89,7 +89,7 @@
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:text="● Магнітола • немає з’єднання"
+                            android:text="− Магнітола • немає з’єднання"
                             android:textColor="@color/text"
                             android:textSize="17sp"
                             android:textStyle="bold" />
@@ -214,7 +214,7 @@
                             android:layout_weight="1"
                             android:background="@drawable/bg_preset_yellow"
                             android:text="ЖОВТИЙ"
-                            android:textColor="#FFD76A"
+                            android:textColor="@color/preset_yellow_text"
                             android:textStyle="bold" />
                         <Space android:layout_width="9dp" android:layout_height="1dp" />
                         <Button
@@ -224,7 +224,7 @@
                             android:layout_weight="1"
                             android:background="@drawable/bg_preset_warm"
                             android:text="ТЕПЛИЙ"
-                            android:textColor="#FFE2A8"
+                            android:textColor="@color/preset_warm_text"
                             android:textStyle="bold" />
                         <Space android:layout_width="9dp" android:layout_height="1dp" />
                         <Button
@@ -234,7 +234,7 @@
                             android:layout_weight="1"
                             android:background="@drawable/bg_preset_white"
                             android:text="БІЛИЙ"
-                            android:textColor="#F3F8FC"
+                            android:textColor="@color/preset_white_text"
                             android:textStyle="bold" />
                     </LinearLayout>
 

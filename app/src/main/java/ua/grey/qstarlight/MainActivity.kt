@@ -15,7 +15,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
-import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -38,17 +37,21 @@ import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import org.json.JSONObject
 import ua.grey.qstarlight.ble.BlePrefs
+import ua.grey.qstarlight.ble.BlePrefs.RuntimeLinkState as UiLinkState
 import ua.grey.qstarlight.ble.QStarBleService
 import ua.grey.qstarlight.control.ControlDispatcher
 import ua.grey.qstarlight.remote.RemoteLinkService
 import ua.grey.qstarlight.update.UpdateManager
 import ua.grey.qstarlight.update.UpdateScheduler
+import ua.grey.qstarlight.ui.LinkIndicator
+import ua.grey.qstarlight.widget.QStarWidgetProvider
 import java.util.LinkedHashMap
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -62,7 +65,6 @@ class MainActivity : AppCompatActivity() {
     private val stateByMac = LinkedHashMap<String, UiLinkState>()
     private var hubUiState = UiLinkState.OFFLINE
 
-    private enum class UiLinkState { CONNECTED, CONNECTING, OFFLINE }
     private var pendingSliderSend: Runnable? = null
     private var pendingConfigSync: Runnable? = null
     private var updatingUi = false
@@ -197,11 +199,17 @@ class MainActivity : AppCompatActivity() {
     )
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        prefs = BlePrefs(this).also { it.ensureDefaults() }
+        applyRoleTheme()
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         setContentView(R.layout.activity_main)
         applySystemBarInsets()
-        prefs = BlePrefs(this).also { it.ensureDefaults() }
+        val light = prefs.role() == BlePrefs.Role.HUB
+        WindowCompat.getInsetsController(window, window.decorView).apply {
+            isAppearanceLightStatusBars = light
+            isAppearanceLightNavigationBars = light
+        }
         bindViews()
         configureUi()
         bindActions()
@@ -777,6 +785,16 @@ class MainActivity : AppCompatActivity() {
         updateRoleUi()
         updateStrobeButton()
         ControlDispatcher.connect(this)
+        QStarWidgetProvider.refresh(this)
+        applyRoleTheme()
+    }
+
+    private fun applyRoleTheme() {
+        delegate.localNightMode = if (prefs.role() == BlePrefs.Role.HUB) {
+            AppCompatDelegate.MODE_NIGHT_NO
+        } else {
+            AppCompatDelegate.MODE_NIGHT_YES
+        }
     }
 
     private fun updateRoleUi() {
@@ -903,17 +921,14 @@ class MainActivity : AppCompatActivity() {
         }, 100)
     }
 
-    private fun stateColor(state: UiLinkState): Int = when (state) {
-        UiLinkState.CONNECTED -> Color.rgb(76, 175, 80)
-        UiLinkState.CONNECTING -> Color.rgb(255, 193, 7)
-        UiLinkState.OFFLINE -> Color.rgb(239, 83, 80)
-    }
+    private fun stateColor(state: UiLinkState): Int =
+        LinkIndicator.color(this, state, prefs.role() == BlePrefs.Role.HUB)
 
     private fun setHubStatus(state: UiLinkState, text: String) {
         hubUiState = state
-        tvLinkStatus.text = "● $text"
+        tvLinkStatus.text = "${LinkIndicator.symbol(state)} $text"
         tvLinkStatus.setTextColor(stateColor(state))
-        tvRemoteStatus.text = "● $text"
+        tvRemoteStatus.text = "${LinkIndicator.symbol(state)} $text"
         tvRemoteStatus.setTextColor(stateColor(state))
     }
 
@@ -922,7 +937,7 @@ class MainActivity : AppCompatActivity() {
         fun apply(view: TextView, index: Int) {
             val d = devices.getOrNull(index)
             if (d == null) {
-                view.text = "● Фара не вибрана"
+                view.text = "${LinkIndicator.symbol(UiLinkState.OFFLINE)} Фара не вибрана"
                 view.setTextColor(stateColor(UiLinkState.OFFLINE))
                 return
             }
@@ -936,7 +951,7 @@ class MainActivity : AppCompatActivity() {
                 UiLinkState.CONNECTING -> "підключення…"
                 UiLinkState.OFFLINE -> "немає з'єднання"
             }
-            view.text = "● ${prefs.lampDisplayName(d)}\n$status"
+            view.text = "${LinkIndicator.symbol(state)} ${prefs.lampDisplayName(d)}\n$status"
             view.setTextColor(stateColor(state))
         }
         apply(tvLamp1, 0)

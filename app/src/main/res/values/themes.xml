@@ -2,12 +2,19 @@
 <resources>
     <style name="Theme.QStarLight" parent="Theme.AppCompat.DayNight.NoActionBar">
         <item name="android:fontFamily">sans</item>
+        <item name="colorAccent">@color/accent</item>
+        <item name="colorControlNormal">@color/muted</item>
+        <item name="colorControlActivated">@color/accent</item>
+        <item name="android:textColorPrimary">@color/text</item>
+        <item name="android:textColorSecondary">@color/muted</item>
+        <item name="android:colorBackground">@color/bg</item>
+        <item name="android:forceDarkAllowed">false</item>
         <item name="android:windowBackground">@color/bg</item>
-        <item name="android:navigationBarColor">#010205</item>
-        <item name="android:statusBarColor">#010205</item>
+        <item name="android:navigationBarColor">@color/bg</item>
+        <item name="android:statusBarColor">@color/bg</item>
         <item name="android:colorAccent">@color/accent</item>
-        <item name="android:windowLightStatusBar">false</item>
-        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:windowLightStatusBar">@bool/light_system_bars</item>
+        <item name="android:windowLightNavigationBar">@bool/light_system_bars</item>
         <item name="android:windowActionModeOverlay">true</item>
     </style>
     <style name="Theme.QStarLight.Translucent" parent="Theme.AppCompat.DayNight.NoActionBar">

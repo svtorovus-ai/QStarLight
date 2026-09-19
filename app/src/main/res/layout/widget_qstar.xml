@@ -14,6 +14,7 @@
         android:orientation="horizontal">
 
         <TextView
+            android:id="@+id/widgetTitle"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
@@ -52,7 +53,7 @@
             android:layout_height="match_parent"
             android:layout_weight="1"
             android:gravity="center"
-            android:text="● ЛІВА"
+            android:text="− ЛІВА"
             android:textColor="#FF4F5E"
             android:textSize="10sp"
             android:textStyle="bold" />
@@ -63,7 +64,7 @@
             android:layout_height="match_parent"
             android:layout_weight="1.2"
             android:gravity="center"
-            android:text="● МАФОН"
+            android:text="− МАФОН"
             android:textColor="#FF4F5E"
             android:textSize="10sp"
             android:textStyle="bold" />
@@ -74,7 +75,7 @@
             android:layout_height="match_parent"
             android:layout_weight="1"
             android:gravity="center"
-            android:text="● ПРАВА"
+            android:text="− ПРАВА"
             android:textColor="#FF4F5E"
             android:textSize="10sp"
             android:textStyle="bold" />
@@ -145,6 +146,7 @@
     </LinearLayout>
 
     <TextView
+        android:id="@+id/widgetBrightnessLabel"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="7dp"

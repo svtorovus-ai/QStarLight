@@ -6,18 +6,21 @@ import android.appwidget.AppWidgetProvider
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.graphics.Color
 import android.widget.RemoteViews
+import androidx.core.content.ContextCompat
 import ua.grey.qstarlight.MainActivity
 import ua.grey.qstarlight.R
 import ua.grey.qstarlight.ble.BlePrefs
 import ua.grey.qstarlight.control.ControlActionReceiver
+import ua.grey.qstarlight.ui.LinkIndicator
 
 class QStarWidgetProvider : AppWidgetProvider() {
     override fun onUpdate(context: Context, manager: AppWidgetManager, ids: IntArray) {
         val prefs = BlePrefs(context).also { it.ensureDefaults() }
         ids.forEach { id ->
             val views = RemoteViews(context.packageName, R.layout.widget_qstar)
+            val light = prefs.role() == BlePrefs.Role.HUB
+            applyTheme(context, views, light)
             val colorName = when {
                 prefs.white <= 15 -> "Жовтий"
                 prefs.white >= 85 -> "Білий"
@@ -39,15 +42,15 @@ class QStarWidgetProvider : AppWidgetProvider() {
                 prefs.hubRuntimeState
             }
 
-            applyLink(views, R.id.widgetHubLink, "МАФОН", hubState)
+            applyLink(context, views, light, R.id.widgetHubLink, "МАФОН", hubState)
             applyLink(
-                views,
+                context, views, light,
                 R.id.widgetLeftLink,
                 "ЛІВА",
                 left?.let { prefs.lampRuntimeState(it.mac) } ?: BlePrefs.RuntimeLinkState.OFFLINE
             )
             applyLink(
-                views,
+                context, views, light,
                 R.id.widgetRightLink,
                 "ПРАВА",
                 right?.let { prefs.lampRuntimeState(it.mac) } ?: BlePrefs.RuntimeLinkState.OFFLINE
@@ -72,7 +75,11 @@ class QStarWidgetProvider : AppWidgetProvider() {
                 val active = value <= prefs.brightness
                 views.setTextColor(
                     viewId,
-                    if (active) Color.rgb(255, 196, 64) else Color.rgb(51, 63, 78)
+                    ContextCompat.getColor(context, if (light) {
+                        if (active) R.color.widget_light_brightness else R.color.widget_light_track
+                    } else {
+                        if (active) R.color.widget_dark_brightness else R.color.widget_dark_track
+                    })
                 )
             }
             manager.updateAppWidget(id, views)
@@ -80,18 +87,39 @@ class QStarWidgetProvider : AppWidgetProvider() {
     }
 
     private fun applyLink(
+        context: Context,
         views: RemoteViews,
+        light: Boolean,
         viewId: Int,
         label: String,
         state: BlePrefs.RuntimeLinkState
     ) {
-        val (dot, color) = when (state) {
-            BlePrefs.RuntimeLinkState.CONNECTED -> "●" to Color.rgb(65, 214, 126)
-            BlePrefs.RuntimeLinkState.CONNECTING -> "●" to Color.rgb(255, 190, 54)
-            BlePrefs.RuntimeLinkState.OFFLINE -> "●" to Color.rgb(255, 79, 94)
-        }
-        views.setTextViewText(viewId, "$dot $label")
-        views.setTextColor(viewId, color)
+        views.setTextViewText(viewId, "${LinkIndicator.symbol(state)} $label")
+        views.setTextColor(viewId, LinkIndicator.color(context, state, light))
+        views.setContentDescription(viewId, "$label • ${LinkIndicator.description(state)}")
+    }
+
+    private fun applyTheme(context: Context, views: RemoteViews, light: Boolean) {
+        // RemoteViews is inflated by the launcher, so do not depend on its night-mode resources.
+        val backgrounds = mapOf(
+            R.id.widgetRoot to if (light) R.drawable.widget_bg_light else R.drawable.widget_bg,
+            R.id.widgetStatus to if (light) R.drawable.widget_status_pill_light else R.drawable.widget_status_pill,
+            R.id.widgetYellow to if (light) R.drawable.widget_button_gold_light else R.drawable.widget_button_gold,
+            R.id.widgetWarm to if (light) R.drawable.widget_button_warm_light else R.drawable.widget_button_warm,
+            R.id.widgetWhite to if (light) R.drawable.widget_button_white_light else R.drawable.widget_button_white,
+            R.id.widgetStrobe to if (light) R.drawable.widget_button_dark_light else R.drawable.widget_button_dark
+        )
+        backgrounds.forEach { (id, drawable) -> views.setInt(id, "setBackgroundResource", drawable) }
+        val colors = mapOf(
+            R.id.widgetTitle to if (light) R.color.widget_light_text else R.color.widget_dark_text,
+            R.id.widgetStatus to if (light) R.color.widget_light_accent else R.color.widget_dark_accent,
+            R.id.widgetBrightnessLabel to if (light) R.color.widget_light_muted else R.color.widget_dark_muted,
+            R.id.widgetYellow to if (light) R.color.widget_light_yellow else R.color.widget_dark_yellow,
+            R.id.widgetWarm to if (light) R.color.widget_light_warm else R.color.widget_dark_warm,
+            R.id.widgetWhite to if (light) R.color.widget_light_text else R.color.widget_dark_text,
+            R.id.widgetStrobe to if (light) R.color.widget_light_accent else R.color.widget_dark_accent
+        )
+        colors.forEach { (id, color) -> views.setTextColor(id, ContextCompat.getColor(context, color)) }
     }
 
     private fun openAppIntent(context: Context): PendingIntent =
