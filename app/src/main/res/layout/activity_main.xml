@@ -323,7 +323,7 @@
                             android:layout_height="48dp"
                             android:background="@drawable/bg_button_accent"
                             android:text="СТРОБ"
-                            android:textColor="#111111"
+                            android:textColor="@color/button_accent_text"
                             android:textStyle="bold" />
                     </LinearLayout>
                     <TextView
@@ -395,7 +395,7 @@
                     <TextView android:id="@+id/tvRemoteStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="7dp" android:text="Магнітола: пошук / offline" android:textColor="@color/text" android:textSize="14sp" android:textStyle="bold" />
                     <EditText android:id="@+id/editRemotePin" android:layout_width="match_parent" android:layout_height="50dp" android:layout_marginTop="9dp" android:background="@drawable/bg_input" android:hint="PIN з магнітоли" android:inputType="number" android:maxLength="6" android:paddingStart="14dp" android:paddingEnd="14dp" android:textColor="@color/text" android:textColorHint="@color/muted" />
                     <EditText android:id="@+id/editHubIp" android:layout_width="match_parent" android:layout_height="50dp" android:layout_marginTop="7dp" android:background="@drawable/bg_input" android:hint="IP магнітоли (необов'язково)" android:inputType="text" android:paddingStart="14dp" android:paddingEnd="14dp" android:textColor="@color/text" android:textColorHint="@color/muted" />
-                    <Button android:id="@+id/btnSavePair" android:layout_width="match_parent" android:layout_height="49dp" android:layout_marginTop="9dp" android:background="@drawable/bg_button_accent" android:text="Знайти та підключити" android:textAllCaps="false" android:textColor="#121212" android:textStyle="bold" />
+                    <Button android:id="@+id/btnSavePair" android:layout_width="match_parent" android:layout_height="49dp" android:layout_marginTop="9dp" android:background="@drawable/bg_button_accent" android:text="Знайти та підключити" android:textAllCaps="false" android:textColor="@color/button_accent_text" android:textStyle="bold" />
                     <Switch android:id="@+id/switchForceDirect" android:layout_width="match_parent" android:layout_height="48dp" android:text="Прямий BLE зараз" android:textColor="@color/text" />
                     <Switch android:id="@+id/switchDirectFallback" android:layout_width="match_parent" android:layout_height="48dp" android:text="Резервний BLE, якщо HUB недоступний" android:textColor="@color/text" />
                     <Switch android:id="@+id/switchRemoteKeepAlive" android:layout_width="match_parent" android:layout_height="48dp" android:visibility="gone" android:text="Тримати зв'язок з HUB у фоні" android:textColor="@color/text" />
@@ -417,7 +417,7 @@
                     <TextView android:id="@+id/tvUpdateStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:text="Версія HUB: невідомо" android:textColor="@color/muted" android:textSize="12sp" />
                     <Switch android:id="@+id/switchAutoPushUpdates" android:layout_width="match_parent" android:layout_height="48dp" android:text="Автоматично передавати нову версію з телефона на HUB" android:textColor="@color/text" />
                     <Switch android:id="@+id/switchSilentRootInstall" android:layout_width="match_parent" android:layout_height="48dp" android:text="Тихе встановлення через root, якщо доступний" android:textColor="@color/text" />
-                    <Button android:id="@+id/btnPushUpdate" android:layout_width="match_parent" android:layout_height="49dp" android:layout_marginTop="7dp" android:background="@drawable/bg_button_accent" android:text="Оновити магнітолу з цього телефона" android:textAllCaps="false" android:textColor="#121212" android:textStyle="bold" />
+                    <Button android:id="@+id/btnPushUpdate" android:layout_width="match_parent" android:layout_height="49dp" android:layout_marginTop="7dp" android:background="@drawable/bg_button_accent" android:text="Оновити магнітолу з цього телефона" android:textAllCaps="false" android:textColor="@color/button_accent_text" android:textStyle="bold" />
                     <Button android:id="@+id/btnInstallPermission" android:layout_width="match_parent" android:layout_height="46dp" android:layout_marginTop="7dp" android:background="@drawable/bg_button_outline" android:text="Дозволити встановлення оновлень на цьому HUB" android:textAllCaps="false" android:textColor="@color/text" />
                     <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="7dp" android:text="Без root Android може показати системне підтвердження встановлення. APK копіювати вручну більше не треба." android:textColor="@color/muted" android:textSize="11sp" />
                 </LinearLayout>
@@ -528,7 +528,7 @@
                     <LinearLayout android:layout_width="match_parent" android:layout_height="48dp" android:layout_marginTop="9dp" android:orientation="horizontal">
                         <Button android:id="@+id/btnCopyLogs" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:background="@drawable/bg_button_outline" android:text="Копіювати" android:textAllCaps="false" android:textColor="@color/text" />
                         <Space android:layout_width="8dp" android:layout_height="1dp" />
-                        <Button android:id="@+id/btnExportLogs" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:background="@drawable/bg_button_accent" android:text="Експорт .txt" android:textAllCaps="false" android:textColor="#121212" />
+                        <Button android:id="@+id/btnExportLogs" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:background="@drawable/bg_button_accent" android:text="Експорт .txt" android:textAllCaps="false" android:textColor="@color/button_accent_text" />
                     </LinearLayout>
                     <TextView android:id="@+id/tvLogCount" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:textColor="@color/muted" android:textSize="11sp" />
                     <TextView android:id="@+id/tvLog" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:minHeight="120dp" android:textColor="@color/log_text" android:textIsSelectable="true" android:textSize="10sp" android:typeface="monospace" />
