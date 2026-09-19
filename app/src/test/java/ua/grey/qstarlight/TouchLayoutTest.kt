@@ -40,7 +40,7 @@ class TouchLayoutTest {
     fun phoneKeepsSingleColumnAndLargeStatusSigns() = checkActivity("phone", "phone-360", false)
 
     private fun checkActivity(role: String, name: String, wide: Boolean) {
-        val context = RuntimeEnvironment.getApplication<Application>()
+        val context = RuntimeEnvironment.getApplication()
         context.getSharedPreferences("qstar_prefs", Context.MODE_PRIVATE).edit().clear().commit()
         val prefs = BlePrefs(context).also { it.ensureDefaults(); it.roleOverride = role }
         prefs.setLampRuntimeState(BlePrefs.LEFT_DEFAULT_MAC, BlePrefs.RuntimeLinkState.CONNECTED)
@@ -77,7 +77,7 @@ class TouchLayoutTest {
 
     @Test @Config(qualifiers = "w400dp-h800dp-night-mdpi")
     fun hubWidgetHasLargeSignsAndReachableBrightnessCellsInDarkLauncher() {
-        val context = RuntimeEnvironment.getApplication<Application>()
+        val context = RuntimeEnvironment.getApplication()
         val prefs = BlePrefs(context).also { it.ensureDefaults(); it.roleOverride = "hub" }
         prefs.setLampRuntimeState(BlePrefs.LEFT_DEFAULT_MAC, BlePrefs.RuntimeLinkState.CONNECTED)
         val manager = shadowOf(AppWidgetManager.getInstance(context))
