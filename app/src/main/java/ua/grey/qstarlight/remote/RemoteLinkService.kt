@@ -54,6 +54,7 @@ class RemoteLinkService : Service() {
     @Volatile private var pendingConfigJson: JSONObject? = null
     @Volatile private var configRetryScheduled = false
     @Volatile private var autoLampWake = false
+    @Volatile private var probeOnly = false
     @Volatile private var pendingConnectMissing = false
     private var sessionStopRunnable: Runnable? = null
 
@@ -66,7 +67,9 @@ class RemoteLinkService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (prefs.role() == BlePrefs.Role.PHONE && intent?.action != ACTION_STOP) {
+        if (prefs.role() == BlePrefs.Role.PHONE &&
+            intent?.action != ACTION_STOP &&
+            intent?.action != ACTION_PROBE_HUB) {
             if (!prefs.anyPhoneLinkConnected() && !prefs.phoneOfflineGraceActive()) {
                 prefs.startPhoneOfflineGrace()
             }
@@ -83,7 +86,13 @@ class RemoteLinkService : Service() {
             }
             ACTION_AUTO_WAKE -> {
                 autoLampWake = intent.getBooleanExtra(EXTRA_FROM_LAMP, false)
+                probeOnly = false
                 reconcilePhoneLifetime()
+                startForegroundSafe()
+                ensureLoop()
+            }
+            ACTION_PROBE_HUB -> {
+                probeOnly = true
                 startForegroundSafe()
                 ensureLoop()
             }
@@ -142,7 +151,7 @@ class RemoteLinkService : Service() {
                 running.set(false)
                 break
             }
-            if (!prefs.anyPhoneLinkConnected() && !prefs.phoneOfflineGraceActive()) {
+            if (!prefs.anyPhoneLinkConnected() && !prefs.phoneOfflineGraceActive() && !probeOnly) {
                 running.set(false)
                 break
             }
@@ -152,6 +161,11 @@ class RemoteLinkService : Service() {
             val host = chooseHost()
             if (host == null) {
                 setConnected(false, "Магнітолу не знайдено")
+                if (probeOnly) {
+                    probeOnly = false
+                    running.set(false)
+                    break
+                }
                 if (autoLampWake || prefs.forceDirect || prefs.directFallback) startDirectBle()
                 sleepQuiet(2200)
                 continue
@@ -189,6 +203,7 @@ class RemoteLinkService : Service() {
                 hubVersionCode = helloJson.optLong("versionCode", -1L)
                 setConnected(true, "Магнітола online", host)
                 autoLampWake = false
+                probeOnly = false
                 if (pendingConnectMissing) {
                     sendLine(JSONObject().put("type", "command").put("command", ControlDispatcher.CMD_CONNECT))
                     pendingConnectMissing = false
@@ -671,6 +686,7 @@ class RemoteLinkService : Service() {
 
         const val ACTION_START = "ua.grey.qstarlight.remote.START"
         const val ACTION_AUTO_WAKE = "ua.grey.qstarlight.remote.AUTO_WAKE"
+        const val ACTION_PROBE_HUB = "ua.grey.qstarlight.remote.PROBE_HUB"
         const val ACTION_STOP = "ua.grey.qstarlight.remote.STOP"
         const val ACTION_COMMAND = "ua.grey.qstarlight.remote.COMMAND"
         const val ACTION_ROUTE_CHANGED = "ua.grey.qstarlight.remote.ROUTE_CHANGED"
@@ -724,6 +740,10 @@ class RemoteLinkService : Service() {
 
         fun start(context: Context) {
             launch(context, Intent(context, RemoteLinkService::class.java).setAction(ACTION_START))
+        }
+
+        fun probeHub(context: Context) {
+            launch(context, Intent(context, RemoteLinkService::class.java).setAction(ACTION_PROBE_HUB))
         }
 
         fun startAuto(context: Context, fromLamp: Boolean) {
