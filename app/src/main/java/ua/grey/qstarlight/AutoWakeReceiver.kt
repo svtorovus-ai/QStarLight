@@ -69,8 +69,9 @@ class AutoWakeReceiver : BroadcastReceiver() {
             WifiManager.NETWORK_STATE_CHANGED_ACTION,
             WifiManager.WIFI_STATE_CHANGED_ACTION -> {
                 if (prefs.role() == BlePrefs.Role.PHONE) {
-                    if (!prefs.anyPhoneLinkConnected() && !prefs.phoneOfflineGraceActive()) prefs.startPhoneOfflineGrace()
-                    RemoteLinkService.startAuto(context, fromLamp = false)
+                    // Wi-Fi changing by itself is not proof that the car is nearby.
+                    // Probe for the HUB once; only a real HUB connection starts the long-lived session.
+                    RemoteLinkService.probeHub(context)
                 }
             }
         }
