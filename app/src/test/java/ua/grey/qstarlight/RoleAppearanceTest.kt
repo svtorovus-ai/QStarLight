@@ -41,10 +41,10 @@ class RoleAppearanceTest {
         assertActivityAppearance(Configuration.UI_MODE_NIGHT_YES)
     }
 
-    @Test @Config(qualifiers = "+night")
-    fun hubIsLightEvenWithDarkSystemAndKeepsExistingSettings() {
+    @Test @Config(qualifiers = "+notnight")
+    fun hubIsDarkEvenWithLightSystemAndKeepsExistingSettings() {
         prefs.roleOverride = "hub"
-        assertActivityAppearance(Configuration.UI_MODE_NIGHT_NO)
+        assertActivityAppearance(Configuration.UI_MODE_NIGHT_YES)
     }
 
     private fun assertActivityAppearance(expectedMode: Int) {
@@ -67,13 +67,13 @@ class RoleAppearanceTest {
     }
 
     @Test @Config(qualifiers = "+notnight")
-    fun widgetStaysDarkForPhoneInLightLauncher() = assertWidgetAppearance(false)
+    fun widgetStaysDarkForPhoneInLightLauncher() = assertWidgetAppearance(false, "phone")
 
-    @Test @Config(qualifiers = "+night")
-    fun widgetStaysLightForHubInDarkLauncher() = assertWidgetAppearance(true)
+    @Test @Config(qualifiers = "+notnight")
+    fun widgetStaysDarkForHubInLightLauncher() = assertWidgetAppearance(false, "hub")
 
-    private fun assertWidgetAppearance(light: Boolean) {
-        prefs.roleOverride = if (light) "hub" else "phone"
+    private fun assertWidgetAppearance(light: Boolean, role: String) {
+        prefs.roleOverride = role
         prefs.hubRuntimeState = RuntimeLinkState.CONNECTING
         val manager = AppWidgetManager.getInstance(context)
         val shadow = shadowOf(manager)
@@ -85,7 +85,8 @@ class RoleAppearanceTest {
         assertTrue(if (light) Color.luminance(title) < 0.1f else Color.luminance(title) > 0.8f)
         assertEquals("+ ЛІВА", root.findViewById<TextView>(R.id.widgetLeftLink).text.toString())
         assertEquals("− ПРАВА", root.findViewById<TextView>(R.id.widgetRightLink).text.toString())
-        assertEquals(if (light) "+ МАФОН" else "… МАФОН", root.findViewById<TextView>(R.id.widgetHubLink).text.toString())
+        val hubExpected = if (role == "hub") "+ МАФОН" else "… МАФОН"
+        assertEquals(hubExpected, root.findViewById<TextView>(R.id.widgetHubLink).text.toString())
         prefs.setLampRuntimeState(BlePrefs.LEFT_DEFAULT_MAC, RuntimeLinkState.CONNECTING)
         prefs.setLampRuntimeState(BlePrefs.RIGHT_DEFAULT_MAC, RuntimeLinkState.CONNECTED)
         QStarWidgetProvider.refresh(context)
