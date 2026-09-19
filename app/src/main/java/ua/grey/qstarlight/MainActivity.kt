@@ -205,10 +205,9 @@ class MainActivity : AppCompatActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         setContentView(R.layout.activity_main)
         applySystemBarInsets()
-        val light = prefs.role() == BlePrefs.Role.HUB
         WindowCompat.getInsetsController(window, window.decorView).apply {
-            isAppearanceLightStatusBars = light
-            isAppearanceLightNavigationBars = light
+            isAppearanceLightStatusBars = false
+            isAppearanceLightNavigationBars = false
         }
         bindViews()
         configureUi()
@@ -790,11 +789,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun applyRoleTheme() {
-        delegate.localNightMode = if (prefs.role() == BlePrefs.Role.HUB) {
-            AppCompatDelegate.MODE_NIGHT_NO
-        } else {
-            AppCompatDelegate.MODE_NIGHT_YES
-        }
+        // Both roles use the same matte dark-neon cockpit theme.
+        delegate.localNightMode = AppCompatDelegate.MODE_NIGHT_YES
     }
 
     private fun updateRoleUi() {
