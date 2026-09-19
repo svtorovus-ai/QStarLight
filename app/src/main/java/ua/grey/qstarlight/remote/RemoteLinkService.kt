@@ -612,8 +612,15 @@ class RemoteLinkService : Service() {
         connected = value
         prefs.hubRuntimeState =
             if (value) BlePrefs.RuntimeLinkState.CONNECTED else BlePrefs.RuntimeLinkState.OFFLINE
-        if (value) prefs.markPhoneLinkAvailable() else if (!prefs.anyPhoneLinkConnected()) prefs.startPhoneOfflineGrace()
-        reconcilePhoneLifetime()
+
+        if (value) {
+            prefs.markPhoneLinkAvailable()
+            reconcilePhoneLifetime()
+        } else if (!probeOnly) {
+            if (!prefs.anyPhoneLinkConnected()) prefs.startPhoneOfflineGrace()
+            reconcilePhoneLifetime()
+        }
+
         QStarWidgetProvider.refresh(this)
         broadcast(if (value) EVENT_CONNECTED else EVENT_DISCONNECTED, message, host)
         updateNotification(message)
