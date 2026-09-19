@@ -69,8 +69,9 @@ class AutoWakeReceiver : BroadcastReceiver() {
             WifiManager.NETWORK_STATE_CHANGED_ACTION,
             WifiManager.WIFI_STATE_CHANGED_ACTION -> {
                 if (prefs.role() == BlePrefs.Role.PHONE) {
-                    if (!prefs.anyPhoneLinkConnected() && !prefs.phoneOfflineGraceActive()) prefs.startPhoneOfflineGrace()
-                    RemoteLinkService.startAuto(context, fromLamp = false)
+                    // A generic Wi-Fi change is not proof that the car is nearby.
+                    // Probe once and only keep running if the QStar HUB actually answers.
+                    RemoteLinkService.probeHub(context)
                 }
             }
         }
