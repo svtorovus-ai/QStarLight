@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- Explicit role palettes: RemoteViews is rendered in the launcher context. -->
-    <color name="link_dark_ok">#41E18D</color>
+    <color name="link_dark_ok">#43E38D</color>
     <color name="link_dark_wait">#FFC247</color>
     <color name="link_dark_bad">#FF5268</color>
     <color name="link_light_ok">#12643E</color>
@@ -10,15 +10,15 @@
     <color name="widget_light_text">#162633</color>
     <color name="widget_dark_text">#F7F9FC</color>
     <color name="widget_light_accent">#006B7B</color>
-    <color name="widget_dark_accent">#72EAF3</color>
+    <color name="widget_dark_accent">#7BF2FA</color>
     <color name="widget_light_muted">#526372</color>
-    <color name="widget_dark_muted">#8493A1</color>
+    <color name="widget_dark_muted">#8596A5</color>
     <color name="widget_light_yellow">#704600</color>
     <color name="widget_dark_yellow">#FFD76A</color>
     <color name="widget_light_warm">#614719</color>
     <color name="widget_dark_warm">#FFE2A8</color>
     <color name="widget_light_brightness">#986500</color>
-    <color name="widget_dark_brightness">#FFC440</color>
+    <color name="widget_dark_brightness">#FFD14A</color>
     <color name="widget_light_track">#BECBD4</color>
-    <color name="widget_dark_track">#26313E</color>
+    <color name="widget_dark_track">#1A2631</color>
 </resources>
