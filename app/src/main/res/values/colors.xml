@@ -46,6 +46,11 @@
     <color name="bottom_nav_start">#FFFFFF</color>
     <color name="bottom_nav_end">#E7EFF4</color>
     <color name="bottom_nav_stroke">#B8CBD7</color>
+    <color name="button_accent_start">#8AF1F6</color>
+    <color name="button_accent_center">#42D6E1</color>
+    <color name="button_accent_end">#1A98A5</color>
+    <color name="button_accent_stroke">#0F7F8B</color>
+    <color name="button_accent_text">#08252B</color>
     <color name="button_outline_start">#FFFFFF</color>
     <color name="button_outline_end">#E7F1F5</color>
     <color name="button_outline_stroke">#468B9B</color>
