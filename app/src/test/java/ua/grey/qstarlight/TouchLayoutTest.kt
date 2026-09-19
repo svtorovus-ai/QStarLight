@@ -70,8 +70,8 @@ class TouchLayoutTest {
         activity.findViewById<Button>(R.id.tabSettings).performClick()
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(250))
         measure(decor, metrics.widthPixels, metrics.heightPixels)
-        assertButtonTextFits(activity.findViewById(R.id.settingsPage))
         capture(decor, "$name-settings")
+        assertButtonTextFits(activity.findViewById(R.id.settingsPage))
         controller.destroy()
     }
 
