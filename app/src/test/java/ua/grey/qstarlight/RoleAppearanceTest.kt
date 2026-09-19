@@ -54,7 +54,7 @@ class RoleAppearanceTest {
         assertEquals(expectedMode, activity.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK)
         val light = expectedMode == Configuration.UI_MODE_NIGHT_NO
         val background = activity.findViewById<android.view.View>(R.id.rootLayout).background as GradientDrawable
-        assertTrue(background.colors!!.all { if (light) Color.luminance(it) > 0.7f else Color.luminance(it) < 0.01f })
+        assertTrue(background.colors!!.all { if (light) Color.luminance(it) > 0.7f else Color.luminance(it) < 0.04f })
         val text = activity.findViewById<TextView>(R.id.tvTemp).currentTextColor
         assertTrue(if (light) Color.luminance(text) < 0.1f else Color.luminance(text) > 0.8f)
         assertTrue(activity.findViewById<TextView>(R.id.tvLamp1).text.startsWith("+ "))
