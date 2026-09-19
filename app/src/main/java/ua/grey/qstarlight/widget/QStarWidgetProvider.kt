@@ -19,8 +19,10 @@ class QStarWidgetProvider : AppWidgetProvider() {
     override fun onUpdate(context: Context, manager: AppWidgetManager, ids: IntArray) {
         val prefs = BlePrefs(context).also { it.ensureDefaults() }
         ids.forEach { id ->
-            val views = RemoteViews(context.packageName, R.layout.widget_qstar)
             val light = prefs.role() == BlePrefs.Role.HUB
+            // Size follows the device role, regardless of the launcher's theme or screen size.
+            val layout = if (light) R.layout.widget_qstar else R.layout.widget_qstar_phone
+            val views = RemoteViews(context.packageName, layout)
             applyTheme(context, views, light)
             val colorName = when {
                 prefs.white <= 15 -> "Жовтий"
@@ -126,11 +128,11 @@ class QStarWidgetProvider : AppWidgetProvider() {
             R.id.widgetStrobe to if (light) R.color.widget_light_accent else R.color.widget_dark_accent
         )
         colors.forEach { (id, color) -> views.setTextColor(id, ContextCompat.getColor(context, color)) }
-        views.setTextViewTextSize(R.id.widgetTitle, TypedValue.COMPLEX_UNIT_SP, if (light) 18f else 16f)
-        views.setTextViewTextSize(R.id.widgetStatus, TypedValue.COMPLEX_UNIT_SP, if (light) 14f else 12f)
-        views.setTextViewTextSize(R.id.widgetBrightnessLabel, TypedValue.COMPLEX_UNIT_SP, if (light) 14f else 12f)
+        views.setTextViewTextSize(R.id.widgetTitle, TypedValue.COMPLEX_UNIT_SP, if (light) 18f else 14f)
+        views.setTextViewTextSize(R.id.widgetStatus, TypedValue.COMPLEX_UNIT_SP, if (light) 14f else 10f)
+        views.setTextViewTextSize(R.id.widgetBrightnessLabel, TypedValue.COMPLEX_UNIT_SP, if (light) 14f else 10f)
         listOf(R.id.widgetYellow, R.id.widgetWarm, R.id.widgetWhite).forEach {
-            views.setTextViewTextSize(it, TypedValue.COMPLEX_UNIT_SP, if (light) 14f else 12f)
+            views.setTextViewTextSize(it, TypedValue.COMPLEX_UNIT_SP, if (light) 14f else 10f)
         }
     }
 
