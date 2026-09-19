@@ -19,7 +19,7 @@ class QStarWidgetProvider : AppWidgetProvider() {
         val prefs = BlePrefs(context).also { it.ensureDefaults() }
         ids.forEach { id ->
             val views = RemoteViews(context.packageName, R.layout.widget_qstar)
-            val light = prefs.role() == BlePrefs.Role.HUB
+            val light = false
             applyTheme(context, views, light)
             val colorName = when {
                 prefs.white <= 15 -> "Жовтий"
