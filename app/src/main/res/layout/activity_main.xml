@@ -398,7 +398,7 @@
                     <Button android:id="@+id/btnSavePair" android:layout_width="match_parent" android:layout_height="49dp" android:layout_marginTop="9dp" android:background="@drawable/bg_button_accent" android:text="Знайти та підключити" android:textAllCaps="false" android:textColor="#121212" android:textStyle="bold" />
                     <Switch android:id="@+id/switchForceDirect" android:layout_width="match_parent" android:layout_height="48dp" android:text="Прямий BLE зараз" android:textColor="@color/text" />
                     <Switch android:id="@+id/switchDirectFallback" android:layout_width="match_parent" android:layout_height="48dp" android:text="Резервний BLE, якщо HUB недоступний" android:textColor="@color/text" />
-                    <Switch android:id="@+id/switchRemoteKeepAlive" android:layout_width="match_parent" android:layout_height="48dp" android:text="Тримати зв'язок з HUB у фоні" android:textColor="@color/text" />
+                    <Switch android:id="@+id/switchRemoteKeepAlive" android:layout_width="match_parent" android:layout_height="48dp" android:visibility="gone" android:text="Тримати зв'язок з HUB у фоні" android:textColor="@color/text" />
                 </LinearLayout>
 
                 <LinearLayout
