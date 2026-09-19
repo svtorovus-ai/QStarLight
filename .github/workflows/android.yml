@@ -65,6 +65,14 @@ jobs:
       - name: Unit tests
         run: gradle :app:testDebugUnitTest --stacktrace
 
+      - name: Upload UI previews
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: QStarLight-ui-previews
+          path: app/build/ui-previews/*.png
+          if-no-files-found: ignore
+
       - name: Build debug APK
         if: ${{ env.QSTAR_KEYSTORE_B64 == '' }}
         run: gradle :app:assembleDebug --stacktrace

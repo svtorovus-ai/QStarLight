@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <dimen name="control_height">52dp</dimen>
+    <dimen name="preset_height">64dp</dimen>
+    <dimen name="slider_height">52dp</dimen>
+    <dimen name="status_cell_height">72dp</dimen>
+    <dimen name="lamp_cell_height">88dp</dimen>
+    <dimen name="header_height">72dp</dimen>
+    <dimen name="nav_height">68dp</dimen>
+    <dimen name="square_button">54dp</dimen>
+    <dimen name="reconnect_width">116dp</dimen>
+    <dimen name="strobe_width">120dp</dimen>
+    <dimen name="text_caption">13sp</dimen>
+    <dimen name="text_body">16sp</dimen>
+    <dimen name="text_small">14sp</dimen>
+    <dimen name="text_section">15sp</dimen>
+    <dimen name="text_button">16sp</dimen>
+    <dimen name="text_tab">14sp</dimen>
+    <dimen name="text_brand">23sp</dimen>
+    <dimen name="text_title">20sp</dimen>
+    <dimen name="text_status">17sp</dimen>
+    <dimen name="text_lamp">14sp</dimen>
+    <dimen name="text_step">28sp</dimen>
+    <dimen name="text_log">12sp</dimen>
+    <dimen name="text_pin">32sp</dimen>
+    <dimen name="status_symbol_size">36sp</dimen>
+    <dimen name="group_gap">12dp</dimen>
+    <dimen name="card_padding">14dp</dimen>
+    <dimen name="control_group_padding">10dp</dimen>
+    <dimen name="slider_thumb">28dp</dimen>
+    <dimen name="slider_track">6dp</dimen>
+    <dimen name="control_stroke">1dp</dimen>
+    <dimen name="switch_width">60dp</dimen>
+</resources>

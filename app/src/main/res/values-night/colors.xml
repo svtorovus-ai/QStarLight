@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+<?xml version='1.0' encoding='utf-8'?>
 <resources>
     <color name="bg">#000102</color>
     <color name="surface">#05080C</color>
@@ -81,4 +81,8 @@
     <color name="preset_yellow_text">#FFD76A</color>
     <color name="preset_warm_text">#FFE2A8</color>
     <color name="preset_white_text">#F3F8FC</color>
+    <color name="selected_text">#F4F8FA</color>
+    <color name="control_group">#050B11</color>
+    <color name="control_group_stroke">#244451</color>
+    <color name="slider_inactive">#415563</color>
 </resources>

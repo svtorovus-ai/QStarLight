@@ -2,5 +2,5 @@
 <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
     <gradient android:angle="270" android:startColor="@color/preset_white_start" android:centerColor="@color/preset_white_center" android:endColor="@color/preset_white_end" />
     <corners android:radius="16dp" />
-    <stroke android:width="1dp" android:color="@color/preset_white_stroke" />
+    <stroke android:width="@dimen/control_stroke" android:color="@color/preset_white_stroke" />
 </shape>

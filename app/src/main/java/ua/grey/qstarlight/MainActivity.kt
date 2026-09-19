@@ -206,8 +206,8 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
         applySystemBarInsets()
         WindowCompat.getInsetsController(window, window.decorView).apply {
-            isAppearanceLightStatusBars = false
-            isAppearanceLightNavigationBars = false
+            isAppearanceLightStatusBars = prefs.role() == BlePrefs.Role.HUB
+            isAppearanceLightNavigationBars = prefs.role() == BlePrefs.Role.HUB
         }
         bindViews()
         configureUi()
@@ -296,8 +296,10 @@ class MainActivity : AppCompatActivity() {
         val updated = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date(packageInfo.lastUpdateTime))
         tvVersion.text = "v${UpdateManager.versionName(this)} • оновлено $updated"
 
-        spinnerStartupMode.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, startupLabels)
-        spinnerStrobeMode.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, strobeLabels)
+        spinnerStartupMode.adapter = ArrayAdapter(this, R.layout.spinner_item, startupLabels)
+            .also { it.setDropDownViewResource(R.layout.spinner_item) }
+        spinnerStrobeMode.adapter = ArrayAdapter(this, R.layout.spinner_item, strobeLabels)
+            .also { it.setDropDownViewResource(R.layout.spinner_item) }
 
         seekTemp.max = 100
         seekBrightness.min = 5
@@ -789,8 +791,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun applyRoleTheme() {
-        // Both roles use the same matte dark-neon cockpit theme.
-        delegate.localNightMode = AppCompatDelegate.MODE_NIGHT_YES
+        delegate.localNightMode = if (prefs.role() == BlePrefs.Role.HUB) {
+            AppCompatDelegate.MODE_NIGHT_NO
+        } else {
+            AppCompatDelegate.MODE_NIGHT_YES
+        }
     }
 
     private fun updateRoleUi() {
@@ -920,11 +925,14 @@ class MainActivity : AppCompatActivity() {
     private fun stateColor(state: UiLinkState): Int =
         LinkIndicator.color(this, state, prefs.role() == BlePrefs.Role.HUB)
 
+    private fun statusLabel(view: TextView, state: UiLinkState, text: String): CharSequence =
+        LinkIndicator.label(state, text, resources.getDimension(R.dimen.status_symbol_size) / view.textSize)
+
     private fun setHubStatus(state: UiLinkState, text: String) {
         hubUiState = state
-        tvLinkStatus.text = "${LinkIndicator.symbol(state)} $text"
+        tvLinkStatus.text = statusLabel(tvLinkStatus, state, text)
         tvLinkStatus.setTextColor(stateColor(state))
-        tvRemoteStatus.text = "${LinkIndicator.symbol(state)} $text"
+        tvRemoteStatus.text = statusLabel(tvRemoteStatus, state, text)
         tvRemoteStatus.setTextColor(stateColor(state))
     }
 
@@ -933,7 +941,7 @@ class MainActivity : AppCompatActivity() {
         fun apply(view: TextView, index: Int) {
             val d = devices.getOrNull(index)
             if (d == null) {
-                view.text = "${LinkIndicator.symbol(UiLinkState.OFFLINE)} Фара не вибрана"
+                view.text = statusLabel(view, UiLinkState.OFFLINE, "Фара не вибрана")
                 view.setTextColor(stateColor(UiLinkState.OFFLINE))
                 return
             }
@@ -947,7 +955,8 @@ class MainActivity : AppCompatActivity() {
                 UiLinkState.CONNECTING -> "підключення…"
                 UiLinkState.OFFLINE -> "немає з'єднання"
             }
-            view.text = "${LinkIndicator.symbol(state)} ${prefs.lampDisplayName(d)}\n$status"
+            view.text = statusLabel(view, state, "${prefs.lampSide(d)}\n$status")
+            view.contentDescription = "${prefs.lampDisplayName(d)} • $status"
             view.setTextColor(stateColor(state))
         }
         apply(tvLamp1, 0)

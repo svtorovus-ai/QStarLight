@@ -6,6 +6,7 @@ import android.appwidget.AppWidgetProvider
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.util.TypedValue
 import android.widget.RemoteViews
 import androidx.core.content.ContextCompat
 import ua.grey.qstarlight.MainActivity
@@ -19,7 +20,7 @@ class QStarWidgetProvider : AppWidgetProvider() {
         val prefs = BlePrefs(context).also { it.ensureDefaults() }
         ids.forEach { id ->
             val views = RemoteViews(context.packageName, R.layout.widget_qstar)
-            val light = false
+            val light = prefs.role() == BlePrefs.Role.HUB
             applyTheme(context, views, light)
             val colorName = when {
                 prefs.white <= 15 -> "Жовтий"
@@ -94,7 +95,9 @@ class QStarWidgetProvider : AppWidgetProvider() {
         label: String,
         state: BlePrefs.RuntimeLinkState
     ) {
-        views.setTextViewText(viewId, "${LinkIndicator.symbol(state)} $label")
+        val labelSize = if (light) 14f else 12f
+        views.setTextViewTextSize(viewId, TypedValue.COMPLEX_UNIT_SP, labelSize)
+        views.setTextViewText(viewId, LinkIndicator.label(state, label, (if (light) 40f else 36f) / labelSize, stacked = true))
         views.setTextColor(viewId, LinkIndicator.color(context, state, light))
         views.setContentDescription(viewId, "$label • ${LinkIndicator.description(state)}")
     }
@@ -104,6 +107,9 @@ class QStarWidgetProvider : AppWidgetProvider() {
         val backgrounds = mapOf(
             R.id.widgetRoot to if (light) R.drawable.widget_bg_light else R.drawable.widget_bg,
             R.id.widgetStatus to if (light) R.drawable.widget_status_pill_light else R.drawable.widget_status_pill,
+            R.id.widgetLeftLink to if (light) R.drawable.widget_status_pill_light else R.drawable.widget_status_pill,
+            R.id.widgetHubLink to if (light) R.drawable.widget_status_pill_light else R.drawable.widget_status_pill,
+            R.id.widgetRightLink to if (light) R.drawable.widget_status_pill_light else R.drawable.widget_status_pill,
             R.id.widgetYellow to if (light) R.drawable.widget_button_gold_light else R.drawable.widget_button_gold,
             R.id.widgetWarm to if (light) R.drawable.widget_button_warm_light else R.drawable.widget_button_warm,
             R.id.widgetWhite to if (light) R.drawable.widget_button_white_light else R.drawable.widget_button_white,
@@ -120,6 +126,12 @@ class QStarWidgetProvider : AppWidgetProvider() {
             R.id.widgetStrobe to if (light) R.color.widget_light_accent else R.color.widget_dark_accent
         )
         colors.forEach { (id, color) -> views.setTextColor(id, ContextCompat.getColor(context, color)) }
+        views.setTextViewTextSize(R.id.widgetTitle, TypedValue.COMPLEX_UNIT_SP, if (light) 18f else 16f)
+        views.setTextViewTextSize(R.id.widgetStatus, TypedValue.COMPLEX_UNIT_SP, if (light) 14f else 12f)
+        views.setTextViewTextSize(R.id.widgetBrightnessLabel, TypedValue.COMPLEX_UNIT_SP, if (light) 14f else 12f)
+        listOf(R.id.widgetYellow, R.id.widgetWarm, R.id.widgetWhite).forEach {
+            views.setTextViewTextSize(it, TypedValue.COMPLEX_UNIT_SP, if (light) 14f else 12f)
+        }
     }
 
     private fun openAppIntent(context: Context): PendingIntent =

@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Widget.QStar.Button" parent="Widget.AppCompat.Button">
+        <item name="android:minHeight">@dimen/control_height</item>
+        <item name="android:minWidth">48dp</item>
+        <item name="android:textSize">@dimen/text_button</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:textColor">@color/text</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:background">@drawable/bg_button_outline</item>
+        <item name="android:backgroundTint">@null</item>
+        <item name="backgroundTint">@null</item>
+        <item name="android:paddingStart">10dp</item>
+        <item name="android:paddingEnd">10dp</item>
+        <item name="android:paddingTop">8dp</item>
+        <item name="android:paddingBottom">8dp</item>
+    </style>
+    <style name="Widget.QStar.Switch" parent="Widget.AppCompat.CompoundButton.Switch">
+        <item name="android:minHeight">@dimen/control_height</item>
+        <item name="android:textSize">@dimen/text_body</item>
+        <item name="android:switchMinWidth">@dimen/switch_width</item>
+        <item name="android:switchPadding">12dp</item>
+        <item name="android:paddingTop">8dp</item>
+        <item name="android:paddingBottom">8dp</item>
+    </style>
+    <style name="Widget.QStar.Input" parent="Widget.AppCompat.EditText">
+        <item name="android:minHeight">@dimen/control_height</item>
+        <item name="android:textSize">@dimen/text_body</item>
+        <item name="android:padding">12dp</item>
+    </style>
+    <style name="Widget.QStar.Spinner" parent="Widget.AppCompat.Spinner">
+        <item name="android:minHeight">@dimen/control_height</item>
+        <item name="android:popupBackground">@drawable/bg_card</item>
+    </style>
+    <style name="Widget.QStar.Slider" parent="Widget.AppCompat.SeekBar">
+        <item name="android:minHeight">@dimen/slider_height</item>
+        <item name="android:maxHeight">@dimen/slider_track</item>
+        <item name="android:thumb">@drawable/slider_thumb</item>
+        <item name="android:thumbTint">@null</item>
+        <item name="android:progressDrawable">@drawable/slider_track</item>
+        <item name="android:progressTint">@null</item>
+        <item name="android:splitTrack">false</item>
+        <item name="android:paddingStart">18dp</item>
+        <item name="android:paddingEnd">18dp</item>
+    </style>
+</resources>
