@@ -59,7 +59,7 @@ class RoleAppearanceTest {
         assertTrue(if (light) Color.luminance(text) < 0.1f else Color.luminance(text) > 0.8f)
         assertTrue(activity.findViewById<TextView>(R.id.tvLamp1).text.startsWith("+ "))
         assertTrue(activity.findViewById<TextView>(R.id.tvLamp2).text.startsWith("− "))
-        val hubSymbol = if (light) "+ " else "… "
+        val hubSymbol = if (prefs.role() == BlePrefs.Role.HUB) "+ " else "… "
         assertTrue(activity.findViewById<TextView>(R.id.tvLinkStatus).text.startsWith(hubSymbol))
         assertTrue(activity.findViewById<TextView>(R.id.tvRemoteStatus).text.startsWith(hubSymbol))
         assertEquals(settings, prefs.syncConfigJson().toString())
