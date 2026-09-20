@@ -83,6 +83,25 @@ class BlePrefsSyncTest {
         assertEquals(BlePrefs.RuntimeLinkState.CONNECTING, hub.lampRuntimeState(mac))
     }
 
+    @Test fun phoneLampStateFollowsTheCurrentOwner() {
+        val phone = device("phone-links")
+        val mac = phone.devices().first().mac
+        phone.roleOverride = "phone"
+        phone.setLampRuntimeState(mac, BlePrefs.RuntimeLinkState.CONNECTED)
+        phone.setDirectLampRuntimeState(mac, BlePrefs.RuntimeLinkState.CONNECTED)
+        phone.setRemoteLampRuntimeState(mac, BlePrefs.RuntimeLinkState.OFFLINE)
+        phone.hubRuntimeState = BlePrefs.RuntimeLinkState.OFFLINE
+        assertEquals(BlePrefs.RuntimeLinkState.CONNECTED, phone.lampRuntimeState(mac))
+        assertTrue(phone.directControlActive())
+
+        // A stale direct flag must not mask the HUB owner.
+        phone.hubRuntimeState = BlePrefs.RuntimeLinkState.CONNECTED
+        assertEquals(BlePrefs.RuntimeLinkState.OFFLINE, phone.lampRuntimeState(mac))
+        phone.setRemoteLampRuntimeState(mac, BlePrefs.RuntimeLinkState.CONNECTED)
+        assertEquals(BlePrefs.RuntimeLinkState.CONNECTED, phone.lampRuntimeState(mac))
+        assertFalse(phone.directControlActive())
+    }
+
     @Test fun localEditAfterReceivingAFutureClockStillWins() {
         val phone = device("phone")
         val hub = device("hub")

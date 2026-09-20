@@ -239,7 +239,18 @@ class BlePrefs(private val context: Context) {
 
     fun lampRuntimeState(mac: String): RuntimeLinkState {
         val local = readRuntimeState(KEY_RUNTIME_LAMP_PREFIX + mac.uppercase())
+        val direct = directLampRuntimeState(mac)
         val remote = remoteLampRuntimeState(mac)
+
+        // On a phone there are two different owners of the same lamps.  Do
+        // not merge their states with OR: a stale direct CONNECTED flag must
+        // not make a HUB-owned lamp look alive (and vice versa).
+        if (role() == Role.PHONE) {
+            if (forceDirect || hubRuntimeState != RuntimeLinkState.CONNECTED) {
+                return direct
+            }
+            return remote
+        }
         return when {
             local == RuntimeLinkState.CONNECTED || remote == RuntimeLinkState.CONNECTED -> RuntimeLinkState.CONNECTED
             local == RuntimeLinkState.CONNECTING || remote == RuntimeLinkState.CONNECTING -> RuntimeLinkState.CONNECTING
@@ -290,6 +301,13 @@ class BlePrefs(private val context: Context) {
 
     fun anyDirectLampConnected(): Boolean =
         devices().any { directLampRuntimeState(it.mac) == RuntimeLinkState.CONNECTED }
+
+    fun anyDirectLampActive(): Boolean =
+        devices().any { directLampRuntimeState(it.mac) != RuntimeLinkState.OFFLINE }
+
+    /** True when commands from this phone must go to its own GATT links. */
+    fun directControlActive(): Boolean =
+        role() == Role.PHONE && (forceDirect || hubRuntimeState != RuntimeLinkState.CONNECTED)
 
     fun anyPhoneLinkConnected(): Boolean =
         hubRuntimeState == RuntimeLinkState.CONNECTED || anyDirectLampConnected()

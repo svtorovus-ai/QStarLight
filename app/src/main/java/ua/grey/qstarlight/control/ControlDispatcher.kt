@@ -22,6 +22,8 @@ object ControlDispatcher {
         val prefs = BlePrefs(context).also { it.ensureDefaults() }
         if (prefs.role() == BlePrefs.Role.HUB) {
             QStarBleService.start(context, Intent().setAction(QStarBleService.ACTION_HUB_START))
+        } else if (prefs.directControlActive()) {
+            QStarBleService.start(context, Intent().setAction(QStarBleService.ACTION_CONNECT))
         } else {
             // Top-level connect is idempotent: connect the HUB and ask it to recover only missing lamps.
             RemoteLinkService.sendCommand(context, CMD_CONNECT)
@@ -31,6 +33,12 @@ object ControlDispatcher {
     fun connectDevice(context: Context, mac: String) {
         val prefs = BlePrefs(context).also { it.ensureDefaults() }
         if (prefs.role() == BlePrefs.Role.HUB) {
+            QStarBleService.start(
+                context,
+                Intent().setAction(QStarBleService.ACTION_CONNECT_DEVICE)
+                    .putExtra(QStarBleService.EXTRA_MAC, mac)
+            )
+        } else if (prefs.directControlActive()) {
             QStarBleService.start(
                 context,
                 Intent().setAction(QStarBleService.ACTION_CONNECT_DEVICE)
@@ -160,8 +168,41 @@ object ControlDispatcher {
             strobe?.let { i.putExtra(QStarBleService.EXTRA_STROBE_ENABLED, it) }
             mac?.let { i.putExtra(QStarBleService.EXTRA_MAC, it) }
             QStarBleService.start(context, i)
+        } else if (prefs.directControlActive()) {
+            dispatchDirect(context, command, white, brightness, power, delta, strobe, mac)
         } else {
             RemoteLinkService.sendCommand(context, command, white, brightness, power, delta, strobe, mac)
         }
+    }
+
+    private fun dispatchDirect(
+        context: Context,
+        command: String,
+        white: Int? = null,
+        brightness: Int? = null,
+        power: Boolean? = null,
+        delta: Int? = null,
+        strobe: Boolean? = null,
+        mac: String? = null
+    ) {
+        val action = when (command) {
+            CMD_PRESET -> QStarBleService.ACTION_PRESET
+            CMD_APPLY -> QStarBleService.ACTION_APPLY
+            CMD_POWER -> QStarBleService.ACTION_POWER
+            CMD_BRIGHTNESS_DELTA -> QStarBleService.ACTION_BRIGHTNESS_DELTA
+            CMD_STROBE -> QStarBleService.ACTION_STROBE
+            CMD_CONNECT -> QStarBleService.ACTION_CONNECT
+            CMD_CONNECT_DEVICE -> QStarBleService.ACTION_CONNECT_DEVICE
+            else -> return
+        }
+        val intent = Intent().setAction(action)
+        white?.let { intent.putExtra(QStarBleService.EXTRA_WHITE, it) }
+        brightness?.let { intent.putExtra(QStarBleService.EXTRA_BRIGHTNESS, it) }
+        power?.let { intent.putExtra(QStarBleService.EXTRA_POWER, it) }
+        delta?.let { intent.putExtra(QStarBleService.EXTRA_DELTA, it) }
+        strobe?.let { intent.putExtra(QStarBleService.EXTRA_STROBE_ENABLED, it) }
+        mac?.let { intent.putExtra(QStarBleService.EXTRA_MAC, it) }
+        DiagnosticLog.write("CONTROL", "route=direct command=$command")
+        QStarBleService.start(context, intent)
     }
 }

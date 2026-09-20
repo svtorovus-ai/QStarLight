@@ -72,7 +72,10 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
     private var rssiLoop = false
     private var hubTransport: HubTransport? = null
     private var remoteTakeover = false
-    private var startupPending = true
+    // A control command may start this service.  It must not be mistaken for
+    // a new connection and be swallowed by the one-shot welcome gate.
+    // Connection/boot actions arm the greeting explicitly.
+    private var startupPending = false
     private var phoneStopRunnable: Runnable? = null
 
     private var strobeActive = false
@@ -85,7 +88,6 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         createNotificationChannel()
         if (prefs.role() == BlePrefs.Role.HUB) {
             hubTransport = HubTransport(this, prefs, this)
-            startupPending = true
         } else {
             reconcilePhoneLifetime()
         }
@@ -114,7 +116,12 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
             if (!prefs.anyPhoneLinkConnected() && !prefs.phoneOfflineGraceActive()) prefs.startPhoneOfflineGrace()
             reconcilePhoneLifetime()
         }
-        if (prefs.role() == BlePrefs.Role.HUB && remoteTakeover && relayHeadUnitCommand(intent)) {
+        // Try the relay for every control action.  The in-memory
+        // remoteTakeover flag is not durable across service recreation, while
+        // HubTransport still knows the connected phone owner.  If no takeover
+        // exists, relayHeadUnitCommand returns false and normal HUB BLE
+        // handling continues.
+        if (prefs.role() == BlePrefs.Role.HUB && relayHeadUnitCommand(intent)) {
             return if (interactive && !oneShot) START_STICKY else START_NOT_STICKY
         }
         when (intent.action) {
@@ -141,6 +148,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
             ACTION_CONNECT_DEVICE -> {
                 interactive = true
                 oneShot = false
+                armWelcomeCycle("connect_device")
                 startForegroundSafe(if (prefs.role() == BlePrefs.Role.HUB) "Магнітола • QStar" else "Прямий BLE • QStar")
                 if (prefs.role() == BlePrefs.Role.HUB) ensureHubTransport()
                 intent.getStringExtra(EXTRA_MAC)?.let { ensureDevice(it) }
@@ -272,9 +280,17 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         if (intent.hasExtra(EXTRA_MAC)) payload.put("mac", intent.getStringExtra(EXTRA_MAC).orEmpty())
         val sent = hubTransport?.sendTakeoverCommand(command, payload) == true
         DiagnosticLog.write("BLE SERVICE", "relay_head_unit command=$command sent=$sent")
-        event(EVENT_PHASE, message=if (sent) "command_relayed:$command" else "command_relay_failed:$command")
-        // Never fall back to the HUB's own BLE while takeover is active.
-        return true
+        if (sent) {
+            event(EVENT_PHASE, message="command_relayed:$command")
+            return true
+        }
+        // Never fall back to the HUB's own BLE while takeover is active, even
+        // if the socket is in the middle of being re-established.
+        if (remoteTakeover) {
+            event(EVENT_PHASE, message="command_relay_failed:$command")
+            return true
+        }
+        return false
     }
 
     private fun disconnectAll() {
@@ -284,6 +300,13 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         readyMacs.clear()
         connectPlan.clear()
         connectingMac = null
+        prefs.devices().forEach { ref ->
+            if (prefs.role() == BlePrefs.Role.PHONE) {
+                prefs.setDirectLampRuntimeState(ref.mac, BlePrefs.RuntimeLinkState.OFFLINE)
+            }
+            prefs.setLampRuntimeState(ref.mac, BlePrefs.RuntimeLinkState.OFFLINE)
+        }
+        QStarWidgetProvider.refresh(this)
     }
 
     private fun hasScanPermission(): Boolean {
@@ -634,7 +657,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         // During the initial pair-up the lamps can briefly disconnect while
         // Android is still discovering/subscribing.  Treating that as a real
         // runtime failure turns a normal yellow welcome into white failsafe.
-        if (bootPending || startupPending || welcomeInProgress) {
+        if (bootPending || startupPending || welcomeInProgress || welcomeWaitingForOff) {
             DiagnosticLog.write("BLE", "skip failsafe while welcome is pending: $reason")
             scheduleReconnect(250)
             return
@@ -1113,10 +1136,14 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         }
         QStarWidgetProvider.refresh(this)
         event(EVENT_ERROR, mac, connections[mac]?.name, message)
-        val wasReady = readyMacs.remove(mac)
+        readyMacs.remove(mac)
         lampPowerState.remove(mac)
         if (connectingMac == mac) connectingMac = null
-        if ((wasReady || pairWasReady) && !remoteTakeover) activateSafetyFallback("error:$message")
+        // A single lamp becoming READY during the initial pair-up is not a
+        // runtime failure.  Failsafe is valid only after both lamps were
+        // READY together; otherwise a normal GATT race turns yellow startup
+        // into an unwanted white emergency state.
+        if (pairWasReady && !remoteTakeover) activateSafetyFallback("error:$message")
         if (!remoteTakeover) scheduleReconnect(120)
     }
 
@@ -1132,10 +1159,10 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         }
         QStarWidgetProvider.refresh(this)
         event(EVENT_DISCONNECTED, mac, connections[mac]?.name, "status=$status")
-        val wasReady = readyMacs.remove(mac)
+        readyMacs.remove(mac)
         lampPowerState.remove(mac)
         if (connectingMac == mac) connectingMac = null
-        if ((wasReady || pairWasReady) && !remoteTakeover) activateSafetyFallback("disconnect:$status")
+        if (pairWasReady && !remoteTakeover) activateSafetyFallback("disconnect:$status")
         if (prefs.role() == BlePrefs.Role.HUB && readyMacs.isEmpty() && !remoteTakeover) pairWasReady = false
         if (!remoteTakeover) scheduleReconnect(120)
     }

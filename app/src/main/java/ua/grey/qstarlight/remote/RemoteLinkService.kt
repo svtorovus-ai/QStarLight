@@ -184,7 +184,7 @@ class RemoteLinkService : Service() {
                     running.set(false)
                     break
                 }
-                if (autoLampWake || prefs.forceDirect || prefs.directFallback) startDirectBle()
+                if (autoLampWake || prefs.directControlActive() || prefs.directFallback) startDirectBle()
                 sleepQuiet(2200)
                 continue
             }
@@ -445,7 +445,7 @@ class RemoteLinkService : Service() {
 
     private fun handleCommandIntent(intent: Intent) {
         val cmd = intent.getStringExtra(EXTRA_COMMAND) ?: return
-        if (prefs.forceDirect) {
+        if (prefs.directControlActive()) {
             dispatchDirect(intent)
             return
         }
@@ -461,7 +461,7 @@ class RemoteLinkService : Service() {
             broadcast(EVENT_ROUTE, "Команда через магнітолу", currentHost)
         } else if (cmd == ControlDispatcher.CMD_CONNECT) {
             pendingConnectMissing = true
-            if (prefs.forceDirect || prefs.directFallback) dispatchDirect(intent)
+            if (prefs.directControlActive() || prefs.directFallback) dispatchDirect(intent)
             broadcast(EVENT_CONNECTING, "Підключаю відсутні пристрої…")
         } else if (cmd == ControlDispatcher.CMD_CONNECT_DEVICE) {
             // A tap on a lamp means "try this lamp now" even if the HUB is currently offline.
