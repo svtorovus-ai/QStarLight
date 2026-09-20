@@ -1077,12 +1077,14 @@ class MainActivity : AppCompatActivity() {
                 view.setTextColor(stateColor(UiLinkState.OFFLINE))
                 return
             }
-            val state = stateByMac[d.mac] ?: when (prefs.lampRuntimeState(d.mac)) {
+            // RuntimeLinkState is the merged local + remote/phone state.
+            // Do not let a stale local event hide a lamp connected by another device.
+            val state = when (prefs.lampRuntimeState(d.mac)) {
                 BlePrefs.RuntimeLinkState.CONNECTED -> UiLinkState.CONNECTED
                 BlePrefs.RuntimeLinkState.CONNECTING -> UiLinkState.CONNECTING
                 BlePrefs.RuntimeLinkState.OFFLINE -> UiLinkState.OFFLINE
             }
-            val status = statusByMac[d.mac] ?: when (state) {
+            val status = if (stateByMac[d.mac] == state) statusByMac[d.mac] else when (state) {
                 UiLinkState.CONNECTED -> "підключено"
                 UiLinkState.CONNECTING -> "підключення…"
                 UiLinkState.OFFLINE -> "немає з'єднання"
@@ -1097,8 +1099,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun retryLamp(index: Int) {
         val d = prefs.devices().getOrNull(index) ?: return
-        val live = stateByMac[d.mac] == UiLinkState.CONNECTED ||
-            prefs.lampRuntimeState(d.mac) == BlePrefs.RuntimeLinkState.CONNECTED
+        val live = prefs.lampRuntimeState(d.mac) == BlePrefs.RuntimeLinkState.CONNECTED
         if (live) return
         stateByMac[d.mac] = UiLinkState.CONNECTING
         statusByMac[d.mac] = "підключення…"

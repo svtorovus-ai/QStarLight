@@ -237,15 +237,36 @@ class BlePrefs(private val context: Context) {
         }.getOrDefault(RuntimeLinkState.OFFLINE)
         set(value) { prefs.edit().putString(KEY_RUNTIME_HUB_STATE, value.name).apply() }
 
-    fun lampRuntimeState(mac: String): RuntimeLinkState = runCatching {
-        RuntimeLinkState.valueOf(
-            prefs.getString(KEY_RUNTIME_LAMP_PREFIX + mac.uppercase(), RuntimeLinkState.OFFLINE.name)!!
-        )
-    }.getOrDefault(RuntimeLinkState.OFFLINE)
+    fun lampRuntimeState(mac: String): RuntimeLinkState {
+        val local = readRuntimeState(KEY_RUNTIME_LAMP_PREFIX + mac.uppercase())
+        val remote = remoteLampRuntimeState(mac)
+        return when {
+            local == RuntimeLinkState.CONNECTED || remote == RuntimeLinkState.CONNECTED -> RuntimeLinkState.CONNECTED
+            local == RuntimeLinkState.CONNECTING || remote == RuntimeLinkState.CONNECTING -> RuntimeLinkState.CONNECTING
+            else -> RuntimeLinkState.OFFLINE
+        }
+    }
 
     fun setLampRuntimeState(mac: String, state: RuntimeLinkState) {
         prefs.edit().putString(KEY_RUNTIME_LAMP_PREFIX + mac.uppercase(), state.name).apply()
     }
+
+    fun remoteLampRuntimeState(mac: String): RuntimeLinkState =
+        readRuntimeState(KEY_RUNTIME_REMOTE_LAMP_PREFIX + mac.uppercase())
+
+    fun setRemoteLampRuntimeState(mac: String, state: RuntimeLinkState) {
+        prefs.edit().putString(KEY_RUNTIME_REMOTE_LAMP_PREFIX + mac.uppercase(), state.name).apply()
+    }
+
+    fun clearRemoteLampRuntimeStates() {
+        val e = prefs.edit()
+        devices().forEach { e.putString(KEY_RUNTIME_REMOTE_LAMP_PREFIX + it.mac.uppercase(), RuntimeLinkState.OFFLINE.name) }
+        e.apply()
+    }
+
+    private fun readRuntimeState(key: String): RuntimeLinkState = runCatching {
+        RuntimeLinkState.valueOf(prefs.getString(key, RuntimeLinkState.OFFLINE.name)!!)
+    }.getOrDefault(RuntimeLinkState.OFFLINE)
 
     fun directLampRuntimeState(mac: String): RuntimeLinkState = runCatching {
         RuntimeLinkState.valueOf(
@@ -262,6 +283,7 @@ class BlePrefs(private val context: Context) {
         devices().forEach {
             e.putString(KEY_RUNTIME_LAMP_PREFIX + it.mac.uppercase(), RuntimeLinkState.OFFLINE.name)
             e.putString(KEY_RUNTIME_DIRECT_LAMP_PREFIX + it.mac.uppercase(), RuntimeLinkState.OFFLINE.name)
+            e.putString(KEY_RUNTIME_REMOTE_LAMP_PREFIX + it.mac.uppercase(), RuntimeLinkState.OFFLINE.name)
         }
         e.apply()
     }
@@ -493,6 +515,7 @@ class BlePrefs(private val context: Context) {
         private const val KEY_RUNTIME_HUB_STATE = "runtime_hub_state"
         private const val KEY_RUNTIME_LAMP_PREFIX = "runtime_lamp_"
         private const val KEY_RUNTIME_DIRECT_LAMP_PREFIX = "runtime_direct_lamp_"
+        private const val KEY_RUNTIME_REMOTE_LAMP_PREFIX = "runtime_remote_lamp_"
 
         const val RIGHT_NAME = "QStar~D35D"
         const val LEFT_NAME = "QStar~F072"

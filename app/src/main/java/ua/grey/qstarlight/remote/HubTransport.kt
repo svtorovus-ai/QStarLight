@@ -3,6 +3,7 @@ package ua.grey.qstarlight.remote
 import android.content.Context
 import android.os.Build
 import org.json.JSONObject
+import org.json.JSONArray
 import ua.grey.qstarlight.ble.BlePrefs
 import ua.grey.qstarlight.ble.QStarBleService
 import ua.grey.qstarlight.update.UpdateManager
@@ -22,6 +23,7 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketTimeoutException
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -55,6 +57,7 @@ class HubTransport(
     @Volatile private var discoverySocket: DatagramSocket? = null
     @Volatile private var updateServerSocket: ServerSocket? = null
     @Volatile private var takeoverOwner: String? = null
+    private val remoteBleStates = ConcurrentHashMap<String, ConcurrentHashMap<String, BlePrefs.RuntimeLinkState>>()
 
     fun start() {
         if (!running.compareAndSet(false, true)) return
@@ -74,6 +77,9 @@ class HubTransport(
         try { updateServerSocket?.close() } catch (_: Throwable) { }
         clients.forEach { try { it.socket.close() } catch (_: Throwable) { } }
         clients.clear()
+        val remoteMacs = remoteBleStates.values.flatMap { it.keys }.toSet()
+        remoteBleStates.clear()
+        remoteMacs.forEach { publishRemoteLampState(it) }
         takeoverOwner = null
         setPhoneLinkState(BlePrefs.RuntimeLinkState.OFFLINE)
         sender.shutdownNow()
@@ -164,6 +170,7 @@ class HubTransport(
             setPhoneLinkState(BlePrefs.RuntimeLinkState.CONNECTED)
             DiagnosticLog.write("HUB", "Client authorized: $id; version=${hello.optString("versionName")}")
             sendStatus(peer, "Магнітола готова")
+            sendBleSnapshot(peer)
             sendConfig(peer)
 
             while (running.get() && !socket.isClosed) {
@@ -207,6 +214,8 @@ class HubTransport(
                             }
                         }
                     }
+                    "ble" -> acceptRemoteBle(peer.id, json)
+                    "ble_snapshot" -> acceptRemoteBleSnapshot(peer.id, json)
                     "takeover" -> {
                         val current = takeoverOwner
                         if (current == null || current == id) {
@@ -241,6 +250,8 @@ class HubTransport(
         } finally {
             client?.let {
                 clients.remove(it)
+                val remoteMacs = remoteBleStates.remove(it.id)?.keys.orEmpty().toSet()
+                remoteMacs.forEach { mac -> publishRemoteLampState(mac) }
                 DiagnosticLog.write("HUB", "Client disconnected: ${it.id}")
                 if (clients.isEmpty()) {
                     setPhoneLinkState(BlePrefs.RuntimeLinkState.OFFLINE)
@@ -270,6 +281,82 @@ class HubTransport(
             .put("configRevision", prefs.configRevision).put("configOrigin", prefs.configVersion.origin)
             .put("versionCode", UpdateManager.versionCode(context))
             .put("versionName", UpdateManager.versionName(context)))
+    }
+
+    private fun sendBleSnapshot(client: Client) {
+        val lamps = JSONArray()
+        prefs.devices().forEach { device ->
+            lamps.put(JSONObject()
+                .put("mac", device.mac)
+                .put("state", prefs.lampRuntimeState(device.mac).name))
+        }
+        send(client, JSONObject().put("type", "ble_snapshot").put("lamps", lamps))
+    }
+
+    private fun acceptRemoteBle(clientId: String, json: JSONObject) {
+        val mac = json.optString("mac").trim()
+        if (mac.isBlank()) return
+        val state = remoteStateFromEvent(json.optString("event"), json.optString("message"))
+        remoteBleStates.getOrPut(clientId) { ConcurrentHashMap() }[mac] = state
+        publishRemoteLampState(mac)
+    }
+
+    private fun acceptRemoteBleSnapshot(clientId: String, json: JSONObject) {
+        val incoming = json.optJSONArray("lamps") ?: return
+        val source = remoteBleStates.getOrPut(clientId) { ConcurrentHashMap() }
+        val affected = source.keys.toMutableSet()
+        source.clear()
+        for (index in 0 until incoming.length()) {
+            val lamp = incoming.optJSONObject(index) ?: continue
+            val mac = lamp.optString("mac").trim()
+            if (mac.isBlank()) continue
+            source[mac] = runCatching {
+                BlePrefs.RuntimeLinkState.valueOf(lamp.optString("state", BlePrefs.RuntimeLinkState.OFFLINE.name))
+            }.getOrDefault(BlePrefs.RuntimeLinkState.OFFLINE)
+            affected += mac
+        }
+        affected.forEach { publishRemoteLampState(it) }
+    }
+
+    private fun remoteStateFromEvent(event: String, message: String): BlePrefs.RuntimeLinkState = when (event) {
+        QStarBleService.EVENT_READY -> BlePrefs.RuntimeLinkState.CONNECTED
+        QStarBleService.EVENT_PHASE -> when (message) {
+            "READY" -> BlePrefs.RuntimeLinkState.CONNECTED
+            "CONNECTING", "DISCOVERING", "SUBSCRIBING", "HANDSHAKE" -> BlePrefs.RuntimeLinkState.CONNECTING
+            else -> BlePrefs.RuntimeLinkState.OFFLINE
+        }
+        QStarBleService.EVENT_DISCONNECTED, QStarBleService.EVENT_ERROR -> BlePrefs.RuntimeLinkState.OFFLINE
+        else -> BlePrefs.RuntimeLinkState.OFFLINE
+    }
+
+    private fun publishRemoteLampState(mac: String) {
+        val state = remoteBleStates.values.mapNotNull { it[mac] }
+            .maxByOrNull { remoteStateRank(it) }
+            ?: BlePrefs.RuntimeLinkState.OFFLINE
+        val previous = prefs.remoteLampRuntimeState(mac)
+        prefs.setRemoteLampRuntimeState(mac, state)
+        if (previous == state) return
+        QStarWidgetProvider.refresh(context)
+        val event = when (state) {
+            BlePrefs.RuntimeLinkState.CONNECTED -> QStarBleService.EVENT_READY
+            BlePrefs.RuntimeLinkState.CONNECTING -> QStarBleService.EVENT_PHASE
+            BlePrefs.RuntimeLinkState.OFFLINE -> QStarBleService.EVENT_DISCONNECTED
+        }
+        val message = if (state == BlePrefs.RuntimeLinkState.CONNECTING) "CONNECTING" else "remote=$state"
+        context.sendBroadcast(
+            android.content.Intent(QStarBleService.ACTION_EVENT)
+                .setPackage(context.packageName)
+                .putExtra(QStarBleService.EXTRA_EVENT, event)
+                .putExtra(QStarBleService.EXTRA_MAC, mac)
+                .putExtra(QStarBleService.EXTRA_MESSAGE, message)
+        )
+        DiagnosticLog.write("HUB BLE", "remote mac=$mac state=${state.name}")
+    }
+
+    private fun remoteStateRank(state: BlePrefs.RuntimeLinkState): Int = when (state) {
+        BlePrefs.RuntimeLinkState.OFFLINE -> 0
+        BlePrefs.RuntimeLinkState.CONNECTING -> 1
+        BlePrefs.RuntimeLinkState.CONNECTED -> 2
     }
 
     private fun sendConfig(client: Client) {

@@ -14,6 +14,7 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import org.json.JSONArray
 import org.json.JSONObject
 import ua.grey.qstarlight.MainActivity
 import ua.grey.qstarlight.R
@@ -39,6 +40,7 @@ import java.net.NetworkInterface
 import java.net.Socket
 import java.net.SocketTimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.Executors
 import ua.grey.qstarlight.diagnostics.DiagnosticLog
 import ua.grey.qstarlight.sync.ConfigVersion
@@ -62,6 +64,7 @@ class RemoteLinkService : Service() {
     private var configAttempts = 0
     private val configRetry = Runnable { sendPendingConfig() }
     @Volatile private var pendingConfigJson: JSONObject? = null
+    private val pendingBleEvents = ConcurrentLinkedQueue<JSONObject>()
     @Volatile private var autoLampWake = false
     @Volatile private var probeOnly = false
     @Volatile private var pendingConnectMissing = false
@@ -125,6 +128,11 @@ class RemoteLinkService : Service() {
                 ensureLoop()
                 pushSelfUpdate(manual = true)
             }
+            ACTION_BLE_EVENT -> {
+                startForegroundSafe()
+                ensureLoop()
+                queueBleEvent(intent)
+            }
             else -> {
                 reconcilePhoneLifetime()
                 startForegroundSafe()
@@ -139,6 +147,7 @@ class RemoteLinkService : Service() {
         closeSocket()
         connected = false
         prefs.hubRuntimeState = BlePrefs.RuntimeLinkState.OFFLINE
+        prefs.clearRemoteLampRuntimeStates()
         QStarWidgetProvider.refresh(this)
         hubVersionCode = -1L
         pendingConfigVersion = null
@@ -231,6 +240,8 @@ class RemoteLinkService : Service() {
                     sendSimple("resume")
                 }
                 sendSimple("status_request")
+                sendDirectBleSnapshot()
+                flushPendingBleEvents()
 
                 val localVersion = UpdateManager.versionCode(this)
                 if (prefs.autoPushUpdates && hubVersionCode in 1 until localVersion && lastAutoPushedVersion != localVersion) {
@@ -342,6 +353,31 @@ class RemoteLinkService : Service() {
                     hubVersionCode = json.optLong("versionCode", hubVersionCode)
                     broadcast(EVENT_HUB_STATUS, json.optString("text", "status"), host, line)
                 }
+                "ble_snapshot" -> {
+                    val lamps = json.optJSONArray("lamps") ?: return
+                    for (index in 0 until lamps.length()) {
+                        val lamp = lamps.optJSONObject(index) ?: continue
+                        val mac = lamp.optString("mac").trim()
+                        if (mac.isBlank()) continue
+                        val state = runCatching {
+                            BlePrefs.RuntimeLinkState.valueOf(lamp.optString("state", BlePrefs.RuntimeLinkState.OFFLINE.name))
+                        }.getOrDefault(BlePrefs.RuntimeLinkState.OFFLINE)
+                        prefs.setRemoteLampRuntimeState(mac, state)
+                        val lampEvent = when (state) {
+                            BlePrefs.RuntimeLinkState.CONNECTED -> QStarBleService.EVENT_READY
+                            BlePrefs.RuntimeLinkState.CONNECTING -> QStarBleService.EVENT_PHASE
+                            BlePrefs.RuntimeLinkState.OFFLINE -> QStarBleService.EVENT_DISCONNECTED
+                        }
+                        val lampMessage = if (state == BlePrefs.RuntimeLinkState.CONNECTING) "CONNECTING" else "remote=$state"
+                        broadcast(
+                            EVENT_HUB_BLE,
+                            "Стан фари: ${state.name}",
+                            host,
+                            JSONObject().put("mac", mac).put("event", lampEvent).put("message", lampMessage).toString()
+                        )
+                    }
+                    QStarWidgetProvider.refresh(this)
+                }
                 "config_ack" -> {
                     val legacyOrigin = if (hubProtocol < 3) pendingConfigVersion?.origin.orEmpty() else ""
                     val ack = ConfigVersion(json.optLong("revision", -1L), json.optString("origin", legacyOrigin))
@@ -375,7 +411,7 @@ class RemoteLinkService : Service() {
                                 BlePrefs.RuntimeLinkState.OFFLINE
                             else -> prefs.lampRuntimeState(mac)
                         }
-                        prefs.setLampRuntimeState(mac, state)
+                        prefs.setRemoteLampRuntimeState(mac, state)
                         if (state == BlePrefs.RuntimeLinkState.CONNECTED) prefs.markLampConnected(mac)
                         QStarWidgetProvider.refresh(this)
                     }
@@ -608,6 +644,36 @@ class RemoteLinkService : Service() {
         sendLine(JSONObject().put("type", type))
     }
 
+    private fun queueBleEvent(intent: Intent) {
+        val mac = intent.getStringExtra(EXTRA_MAC).orEmpty()
+        if (mac.isBlank()) return
+        pendingBleEvents.offer(JSONObject()
+            .put("type", "ble")
+            .put("event", intent.getStringExtra(EXTRA_BLE_EVENT).orEmpty())
+            .put("mac", mac)
+            .put("name", intent.getStringExtra(EXTRA_NAME).orEmpty())
+            .put("message", intent.getStringExtra(EXTRA_MESSAGE).orEmpty()))
+        flushPendingBleEvents()
+    }
+
+    private fun sendDirectBleSnapshot() {
+        val lamps = JSONArray()
+        prefs.devices().forEach { device ->
+            lamps.put(JSONObject()
+                .put("mac", device.mac)
+                .put("state", prefs.directLampRuntimeState(device.mac).name))
+        }
+        sendLine(JSONObject().put("type", "ble_snapshot").put("lamps", lamps))
+    }
+
+    private fun flushPendingBleEvents() {
+        if (!connected || writer == null) return
+        while (true) {
+            val event = pendingBleEvents.poll() ?: break
+            sendLine(event)
+        }
+    }
+
     private fun sendLine(json: JSONObject) {
         val out = writer ?: return
         val payload = json.toString()
@@ -685,10 +751,8 @@ class RemoteLinkService : Service() {
             prefs.markPhoneLinkAvailable()
         } else if (!probeOnly) {
             // Once HUB transport is gone, its last lamp state is no longer authoritative.
-            // Keep any direct-BLE lamp green; mark the rest offline until direct/HUB events arrive.
-            prefs.devices().forEach { d ->
-                prefs.setLampRuntimeState(d.mac, prefs.directLampRuntimeState(d.mac))
-            }
+            // Keep any direct-BLE state and clear only the remote HUB snapshot.
+            prefs.clearRemoteLampRuntimeStates()
             if (!prefs.anyPhoneLinkConnected()) prefs.startPhoneOfflineGrace()
         }
         if (!probeOnly || value) reconcilePhoneLifetime()
@@ -771,6 +835,7 @@ class RemoteLinkService : Service() {
         const val ACTION_ROUTE_CHANGED = "ua.grey.qstarlight.remote.ROUTE_CHANGED"
         const val ACTION_PUSH_CONFIG = "ua.grey.qstarlight.remote.PUSH_CONFIG"
         const val ACTION_PUSH_UPDATE = "ua.grey.qstarlight.remote.PUSH_UPDATE"
+        const val ACTION_BLE_EVENT = "ua.grey.qstarlight.remote.BLE_EVENT"
         const val ACTION_EVENT = "ua.grey.qstarlight.remote.EVENT"
 
         const val EXTRA_COMMAND = "command"
@@ -786,6 +851,8 @@ class RemoteLinkService : Service() {
         const val EXTRA_RAW = "raw"
         const val EXTRA_HUB_VERSION = "hub_version"
         const val EXTRA_MAC = "mac"
+        const val EXTRA_NAME = "name"
+        const val EXTRA_BLE_EVENT = "ble_event"
         const val EXTRA_FROM_LAMP = "from_lamp"
 
         const val EVENT_CONNECTING = "connecting"
@@ -849,6 +916,18 @@ class RemoteLinkService : Service() {
 
         fun pushUpdate(context: Context) {
             launch(context, Intent(context, RemoteLinkService::class.java).setAction(ACTION_PUSH_UPDATE))
+        }
+
+        fun syncDirectBleEvent(context: Context, event: String, mac: String, name: String?, message: String?) {
+            launch(
+                context,
+                Intent(context, RemoteLinkService::class.java)
+                    .setAction(ACTION_BLE_EVENT)
+                    .putExtra(EXTRA_BLE_EVENT, event)
+                    .putExtra(EXTRA_MAC, mac)
+                    .putExtra(EXTRA_NAME, name)
+                    .putExtra(EXTRA_MESSAGE, message)
+            )
         }
 
         fun sendCommand(

@@ -30,6 +30,7 @@ import ua.grey.qstarlight.R
 import ua.grey.qstarlight.control.ControlActionReceiver
 import ua.grey.qstarlight.control.ControlDispatcher
 import ua.grey.qstarlight.remote.HubTransport
+import ua.grey.qstarlight.remote.RemoteLinkService
 import ua.grey.qstarlight.widget.QStarWidgetProvider
 import java.util.ArrayDeque
 import java.util.LinkedHashMap
@@ -514,7 +515,12 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
                 "WELCOME",
                 "phone_or_hub_ready=${prefs.role()} states=${states.joinToString(",")} run=$bothLampsWereOff"
             )
-            if (bothLampsWereOff) runBootRoutine() else finishReadyCycle()
+            if (bothLampsWereOff) {
+                // The saved color/power is only the previous UI state. It must not
+                // suppress the selected welcome profile after a real lamp power-off.
+                prefs.power = false
+                runBootRoutine()
+            } else finishReadyCycle()
         }
     }
 
@@ -602,6 +608,24 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         sendAt(0)
     }
 
+    private fun sendFrameAllSimultaneous(frame: ByteArray, done: () -> Unit) {
+        val refs = prefs.devices()
+        if (refs.isEmpty() || refs.any { connections[it.mac]?.isReady() != true }) {
+            event(EVENT_ERROR, message = "Waiting for both QStar lamps")
+            scheduleReconnect()
+            done()
+            return
+        }
+        val list = refs.map { connections[it.mac]!! }
+        val remaining = java.util.concurrent.atomic.AtomicInteger(list.size)
+        list.forEach { connection ->
+            connection.writeControl(frame) { ok ->
+                event(if (ok) EVENT_WRITE else EVENT_ERROR, connection.mac, connection.name, QStarProtocol.hex(frame))
+                if (remaining.decrementAndGet() == 0) handler.post(done)
+            }
+        }
+    }
+
     private fun sendFrameReady(frame: ByteArray, done: () -> Unit) {
         val list = prefs.devices().mapNotNull { connections[it.mac] }.filter { it.isReady() }
         fun sendAt(index: Int) {
@@ -635,14 +659,14 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         when (prefs.startupMode) {
             BlePrefs.StartupMode.OFF -> {
                 prefs.power = false
-                sendFrameAll(QStarProtocol.POWER_OFF) { finishBootRoutine() }
+                sendFrameAllSimultaneous(QStarProtocol.POWER_OFF) { finishBootRoutine() }
             }
             BlePrefs.StartupMode.RESTORE -> {
                 if (!prefs.power) {
-                    sendFrameAll(QStarProtocol.POWER_OFF) { finishBootRoutine() }
+                    sendFrameAllSimultaneous(QStarProtocol.POWER_OFF) { finishBootRoutine() }
                 } else {
-                    sendFrameAll(QStarProtocol.POWER_ON) {
-                        sendFrameAll(QStarProtocol.cctFrame(prefs.white, prefs.brightness)) { finishBootRoutine() }
+                    sendFrameAllSimultaneous(QStarProtocol.POWER_ON) {
+                        sendFrameAllSimultaneous(QStarProtocol.cctFrame(prefs.white, prefs.brightness)) { finishBootRoutine() }
                     }
                 }
             }
@@ -650,8 +674,8 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
                 prefs.power = true
                 prefs.white = prefs.startWhite
                 prefs.brightness = prefs.startBrightness
-                sendFrameAll(QStarProtocol.POWER_ON) {
-                    sendFrameAll(QStarProtocol.cctFrame(prefs.startWhite, prefs.startBrightness)) { finishBootRoutine() }
+                sendFrameAllSimultaneous(QStarProtocol.POWER_ON) {
+                    sendFrameAllSimultaneous(QStarProtocol.cctFrame(prefs.startWhite, prefs.startBrightness)) { finishBootRoutine() }
                 }
             }
             BlePrefs.StartupMode.FADE_TO_TARGET -> {
@@ -667,11 +691,11 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         prefs.power = true
         prefs.white = startWhite
         prefs.brightness = brightness
-        sendFrameAll(QStarProtocol.POWER_ON) {
-            sendFrameAll(QStarProtocol.cctFrame(startWhite, brightness)) {
+        sendFrameAllSimultaneous(QStarProtocol.POWER_ON) {
+            sendFrameAllSimultaneous(QStarProtocol.cctFrame(startWhite, brightness)) {
                 if (prefs.fadeDurationMs <= 0 || startWhite == targetWhite) {
                     prefs.white = targetWhite
-                    sendFrameAll(QStarProtocol.cctFrame(targetWhite, brightness)) { finishBootRoutine() }
+                    sendFrameAllSimultaneous(QStarProtocol.cctFrame(targetWhite, brightness)) { finishBootRoutine() }
                 } else {
                     val steps = prefs.fadeSteps.coerceAtLeast(2)
                     val delay = (prefs.fadeDurationMs / steps).coerceAtLeast(20)
@@ -683,7 +707,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
 
     private fun fadeStep(step: Int, total: Int, startWhite: Int, targetWhite: Int, brightness: Int, delayMs: Int) {
         val white = (startWhite + (targetWhite - startWhite) * step / total).coerceIn(0, 100)
-        sendFrameAll(QStarProtocol.cctFrame(white, brightness)) {
+        sendFrameAllSimultaneous(QStarProtocol.cctFrame(white, brightness)) {
             if (step >= total) {
                 prefs.white = targetWhite
                 prefs.brightness = brightness
@@ -987,6 +1011,9 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         if (rssi != null) i.putExtra(EXTRA_RSSI, rssi)
         sendBroadcast(i)
         hubTransport?.publishBle(type, mac, name, message)
+        if (prefs.role() == BlePrefs.Role.PHONE && mac != null && type in setOf(EVENT_PHASE, EVENT_READY, EVENT_DISCONNECTED, EVENT_ERROR)) {
+            RemoteLinkService.syncDirectBleEvent(this, type, mac, name, message)
+        }
     }
 
     private fun createNotificationChannel() {

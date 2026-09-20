@@ -72,6 +72,17 @@ class BlePrefsSyncTest {
         assertEquals(BlePrefs.StartupMode.SMOOTH_YELLOW_WHITE, hub.startupMode)
     }
 
+    @Test fun localAndRemoteLampLinksAreMerged() {
+        val hub = device("hub-links")
+        val mac = hub.devices().first().mac
+        hub.setLampRuntimeState(mac, BlePrefs.RuntimeLinkState.OFFLINE)
+        hub.setRemoteLampRuntimeState(mac, BlePrefs.RuntimeLinkState.CONNECTED)
+        assertEquals(BlePrefs.RuntimeLinkState.CONNECTED, hub.lampRuntimeState(mac))
+        hub.setRemoteLampRuntimeState(mac, BlePrefs.RuntimeLinkState.OFFLINE)
+        hub.setLampRuntimeState(mac, BlePrefs.RuntimeLinkState.CONNECTING)
+        assertEquals(BlePrefs.RuntimeLinkState.CONNECTING, hub.lampRuntimeState(mac))
+    }
+
     @Test fun localEditAfterReceivingAFutureClockStillWins() {
         val phone = device("phone")
         val hub = device("hub")
