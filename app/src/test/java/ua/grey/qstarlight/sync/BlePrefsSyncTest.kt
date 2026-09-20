@@ -64,6 +64,14 @@ class BlePrefsSyncTest {
         assertFalse(hub.welcomeOnConnect)
     }
 
+    @Test fun smoothYellowWhiteStartupModeSurvivesSync() {
+        val phone = device("phone-smooth")
+        val hub = device("hub-smooth")
+        phone.startupMode = BlePrefs.StartupMode.SMOOTH_YELLOW_WHITE
+        assertTrue(hub.applySyncConfig(phone.syncConfigJson()))
+        assertEquals(BlePrefs.StartupMode.SMOOTH_YELLOW_WHITE, hub.startupMode)
+    }
+
     @Test fun localEditAfterReceivingAFutureClockStillWins() {
         val phone = device("phone")
         val hub = device("hub")

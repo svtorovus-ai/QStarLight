@@ -205,6 +205,7 @@ class MainActivity : AppCompatActivity() {
         "Відновити останній стан",
         "Тільки стартовий колір",
         "Стартовий → робочий",
+        "Плавний жовтий → білий",
         "Почати вимкненими"
     )
 
@@ -581,6 +582,7 @@ class MainActivity : AppCompatActivity() {
                 val mode = BlePrefs.StartupMode.entries.getOrNull(position) ?: return
                 if (prefs.startupMode != mode) {
                     prefs.startupMode = mode
+                    updateSettingsLabels()
                     scheduleConfigSync()
                 }
             }
@@ -959,8 +961,19 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateSettingsLabels() {
-        tvStartWhite.text = "Стартовий колір • ${colorLabel(prefs.startWhite)} • Білий ${prefs.startWhite}%"
-        tvTargetWhite.text = "Перехід на • ${colorLabel(prefs.targetWhite)} • Білий ${prefs.targetWhite}%"
+        val fixedYellowWhite = prefs.startupMode == BlePrefs.StartupMode.SMOOTH_YELLOW_WHITE
+        tvStartWhite.text = if (fixedYellowWhite) {
+            "Стартовий колір • Жовтий • Білий 0%"
+        } else {
+            "Стартовий колір • ${colorLabel(prefs.startWhite)} • Білий ${prefs.startWhite}%"
+        }
+        tvTargetWhite.text = if (fixedYellowWhite) {
+            "Перехід на • Білий • Білий 100%"
+        } else {
+            "Перехід на • ${colorLabel(prefs.targetWhite)} • Білий ${prefs.targetWhite}%"
+        }
+        seekStartWhite.isEnabled = !fixedYellowWhite
+        seekTargetWhite.isEnabled = !fixedYellowWhite
         tvStartBrightness.text = "Стартова яскравість • ${prefs.startBrightness}%"
         tvFadeDuration.text = "Тривалість переходу • ${formatDuration(prefs.fadeDurationMs)}"
         tvFadeSteps.text = "Плавність • ${prefs.fadeSteps} кроків"

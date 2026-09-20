@@ -15,7 +15,7 @@ class BlePrefs(private val context: Context) {
     data class DeviceRef(val mac: String, val name: String)
 
     enum class Role { HUB, PHONE }
-    enum class StartupMode { RESTORE, START_ONLY, FADE_TO_TARGET, OFF }
+    enum class StartupMode { RESTORE, START_ONLY, FADE_TO_TARGET, SMOOTH_YELLOW_WHITE, OFF }
     enum class StrobeMode { CLASSIC, DOUBLE, TRIPLE, ALTERNATE, DOUBLE_ALTERNATE, YELLOW_WHITE_SWAP }
 
     fun ensureDefaults(): Unit = synchronized(CONFIG_LOCK) {
