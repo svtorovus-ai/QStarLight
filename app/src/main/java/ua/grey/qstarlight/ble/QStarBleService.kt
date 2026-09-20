@@ -57,7 +57,9 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
     private val readyMacs = linkedSetOf<String>()
     private val lampPowerState = LinkedHashMap<String, Boolean>()
     private var pairWasReady = false
+    private var safetyArmedAtElapsed = 0L
     private var safetyFallbackActive = false
+    private var safetyWriteInFlight = false
     private var bootPending = false
     private var welcomeStateAttempts = 0
     private var welcomeCheckScheduled = false
@@ -155,6 +157,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
             }
             ACTION_APPLY -> {
                 stopStrobeInternal(restore = false)
+                clearSafetyForCommand("apply")
                 prefs.white = intent.getIntExtra(EXTRA_WHITE, prefs.white)
                 prefs.brightness = intent.getIntExtra(EXTRA_BRIGHTNESS, prefs.brightness)
                 oneShot = intent.getBooleanExtra(EXTRA_ONE_SHOT, false)
@@ -164,6 +167,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
             }
             ACTION_POWER -> {
                 stopStrobeInternal(restore = false)
+                clearSafetyForCommand("power")
                 prefs.power = intent.getBooleanExtra(EXTRA_POWER, prefs.power)
                 oneShot = intent.getBooleanExtra(EXTRA_ONE_SHOT, false)
                 startForegroundSafe("Changing light power")
@@ -171,6 +175,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
             }
             ACTION_PRESET -> {
                 stopStrobeInternal(restore = false)
+                clearSafetyForCommand("preset")
                 prefs.white = intent.getIntExtra(EXTRA_WHITE, prefs.white).coerceIn(0, 100)
                 oneShot = intent.getBooleanExtra(EXTRA_ONE_SHOT, !interactive)
                 startForegroundSafe("Applying preset")
@@ -179,6 +184,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
             }
             ACTION_BRIGHTNESS_DELTA -> {
                 stopStrobeInternal(restore = false)
+                clearSafetyForCommand("brightness")
                 prefs.brightness = (prefs.brightness + intent.getIntExtra(EXTRA_DELTA, 0)).coerceIn(5, 100)
                 oneShot = intent.getBooleanExtra(EXTRA_ONE_SHOT, !interactive)
                 startForegroundSafe("Changing brightness")
@@ -186,6 +192,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
                 ensureConnections()
             }
             ACTION_STROBE -> {
+                clearSafetyForCommand("strobe")
                 val requested = if (intent.hasExtra(EXTRA_STROBE_ENABLED)) {
                     intent.getBooleanExtra(EXTRA_STROBE_ENABLED, false)
                 } else !strobeActive
@@ -409,6 +416,9 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
             connections[ref.mac]?.disconnect()
             connections[ref.mac] = connection
             readyMacs.remove(ref.mac)
+            // A new GATT session must not reuse the power state reported by
+            // the previous session while the new handshake is still running.
+            lampPowerState.remove(ref.mac)
             connectingMac = ref.mac
             connection.connect()
             handler.postDelayed({
@@ -461,24 +471,33 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
             return
         }
         reconnectRounds = 0
+        if (!pairWasReady) {
+            // Android BLE can report a short-lived disconnect immediately
+            // after the first pair-up. Give the new session a small settle
+            // window before treating that as a runtime failure.
+            safetyArmedAtElapsed = SystemClock.elapsedRealtime() + 2_500L
+        }
         pairWasReady = true
         if (prefs.role() == BlePrefs.Role.PHONE) {
             prefs.markPhoneLinkAvailable()
             reconcilePhoneLifetime()
         }
+        if (welcomeInProgress) return
+        if (safetyFallbackActive) {
+            sendSafetyToReadyLamps()
+            return
+        }
+        // An explicit command (especially POWER_OFF) must not be swallowed by
+        // the one-shot welcome gate when both GATT links are already READY.
+        // The callback itself may update the power map and re-enter welcome.
+        pendingAfterReady?.let { callback ->
+            pendingAfterReady = null
+            callback.invoke()
+            return
+        }
         val greetingPending = bootPending || startupPending || welcomeWaitingForOff
         if (greetingPending) {
             evaluateWelcomeIfReady()
-            return
-        }
-        if (welcomeInProgress) return
-        if (safetyFallbackActive) {
-            sendFrameAll(QStarProtocol.POWER_ON) {
-                sendFrameAll(QStarProtocol.cctFrame(100, 100)) {
-                    safetyFallbackActive = false
-                    handler.postDelayed({ restoreDesiredAfterSafety() }, 100)
-                }
-            }
             return
         }
         finishReadyCycle()
@@ -493,6 +512,10 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
             if (welcomeInProgress) return@post
             if (!allSelectedReady()) {
                 scheduleReconnect()
+                return@post
+            }
+            if (safetyFallbackActive) {
+                DiagnosticLog.write("WELCOME", "deferred_by_failsafe states=${prefs.devices().map { lampPowerState[it.mac] }}")
                 return@post
             }
 
@@ -532,7 +555,6 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
             startupPending = false
             welcomeWaitingForOff = !bothLampsWereOff
             welcomeStateAttempts = 0
-            safetyFallbackActive = false
             DiagnosticLog.write(
                 "WELCOME",
                 "phone_or_hub_ready=${prefs.role()} states=${states.joinToString(",")} run=$bothLampsWereOff"
@@ -558,41 +580,79 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         if (interactive && !rssiLoop) startRssiLoop()
     }
 
-    private fun restoreDesiredAfterSafety() {
-        if (!allSelectedReady()) {
-            safetyFallbackActive = true
-            scheduleReconnect(250)
-            return
-        }
-        if (prefs.power) {
-            sendFrameAll(QStarProtocol.POWER_ON) {
-                sendFrameAll(QStarProtocol.cctFrame(prefs.white, prefs.brightness)) { finishReadyCycle() }
-            }
-        } else {
-            sendFrameAll(QStarProtocol.POWER_OFF) { finishReadyCycle() }
-        }
+    private fun clearSafetyForCommand(source: String) {
+        if (!safetyFallbackActive) return
+        safetyFallbackActive = false
+        DiagnosticLog.write("BLE", "failsafe cleared by $source")
     }
 
     private fun activateSafetyFallback(reason: String) {
         if (remoteTakeover) return
-        if (welcomeInProgress || ((bootPending || startupPending) && !welcomeWaitingForOff)) {
+        // During the initial pair-up the lamps can briefly disconnect while
+        // Android is still discovering/subscribing.  Treating that as a real
+        // runtime failure turns a normal yellow welcome into white failsafe.
+        if (bootPending || startupPending || welcomeInProgress) {
             DiagnosticLog.write("BLE", "skip failsafe while welcome is pending: $reason")
+            scheduleReconnect(250)
+            return
+        }
+        if (SystemClock.elapsedRealtime() < safetyArmedAtElapsed) {
+            DiagnosticLog.write("BLE", "skip failsafe during startup settle: $reason")
             scheduleReconnect(250)
             return
         }
         stopStrobeInternal(restore = false)
         safetyFallbackActive = true
         latestCct = null
+        DiagnosticLog.write("BLE", "failsafe armed ready=${readyMacs.size}/${prefs.devices().size} reason=$reason")
         event(EVENT_PHASE, message = "failsafe_white_100:$reason")
-        sendFrameReady(QStarProtocol.POWER_ON) {
-            sendFrameReady(QStarProtocol.cctFrame(100, 100)) { }
-        }
+        sendSafetyToReadyLamps()
         scheduleReconnect(250)
     }
 
-    private fun sendSafetyTo(connection: LampConnection, done: () -> Unit) {
-        connection.writeControl(QStarProtocol.POWER_ON) {
-            connection.writeControl(QStarProtocol.cctFrame(100, 100)) { done() }
+    private fun sendSafetyToReadyLamps() {
+        if (!safetyFallbackActive || welcomeInProgress || safetyWriteInFlight) return
+        val list = prefs.devices().mapNotNull { connections[it.mac] }.filter { it.isReady() }
+        if (list.isEmpty()) {
+            DiagnosticLog.write("BLE", "failsafe waiting_for_ready ready=0/${prefs.devices().size}")
+            scheduleReconnect(250)
+            return
+        }
+
+        safetyWriteInFlight = true
+        DiagnosticLog.write("BLE", "failsafe write ready=${list.size}/${prefs.devices().size}")
+        sendFrameReadySimultaneous(list, QStarProtocol.POWER_ON) {
+            if (!safetyFallbackActive) {
+                safetyWriteInFlight = false
+                return@sendFrameReadySimultaneous
+            }
+            sendFrameReadySimultaneous(list, QStarProtocol.cctFrame(100, 100)) {
+                safetyWriteInFlight = false
+                DiagnosticLog.write("BLE", "failsafe white sent ready=${list.count { it.isReady() }}/${prefs.devices().size}")
+                // A lamp can have dropped while the two writes were queued.
+                // Re-arm once, after the current GATT queues have drained.
+                if (safetyFallbackActive && list.any { !it.isReady() }) {
+                    handler.postDelayed({ sendSafetyToReadyLamps() }, 180)
+                }
+            }
+        }
+    }
+
+    private fun sendFrameReadySimultaneous(
+        list: List<LampConnection>,
+        frame: ByteArray,
+        done: () -> Unit
+    ) {
+        if (list.isEmpty()) {
+            done()
+            return
+        }
+        val remaining = java.util.concurrent.atomic.AtomicInteger(list.size)
+        list.forEach { connection ->
+            connection.writeControl(frame) { ok ->
+                event(if (ok) EVENT_WRITE else EVENT_ERROR, connection.mac, connection.name, QStarProtocol.hex(frame))
+                if (remaining.decrementAndGet() == 0) handler.post(done)
+            }
         }
     }
 
@@ -613,7 +673,15 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
     }
 
     private fun sendPower(on: Boolean, done: (() -> Unit)? = null) {
-        sendFrameAll(if (on) QStarProtocol.POWER_ON else QStarProtocol.POWER_OFF) {
+        sendFrameAllSimultaneous(if (on) QStarProtocol.POWER_ON else QStarProtocol.POWER_OFF) {
+            if (!on) {
+                // Some controller firmwares do not emit a state notification
+                // for every power write.  Record the explicit OFF command so
+                // the armed one-shot welcome cannot wait forever for a packet
+                // that never arrives.
+                prefs.devices().forEach { lampPowerState[it.mac] = false }
+                if (bootPending || startupPending || welcomeWaitingForOff) evaluateWelcomeIfReady()
+            }
             done?.invoke()
             if (oneShot) shutdownSoon()
         }
@@ -655,16 +723,6 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
                 if (remaining.decrementAndGet() == 0) handler.post(done)
             }
         }
-    }
-
-    private fun sendFrameReady(frame: ByteArray, done: () -> Unit) {
-        val list = prefs.devices().mapNotNull { connections[it.mac] }.filter { it.isReady() }
-        fun sendAt(index: Int) {
-            if (index >= list.size) { done(); return }
-            val c = list[index]
-            c.writeControl(frame) { handler.postDelayed({ sendAt(index + 1) }, 35) }
-        }
-        sendAt(0)
     }
 
     private fun applyPowerStates(states: List<Boolean>, done: () -> Unit) {
@@ -968,18 +1026,20 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         }
         QStarWidgetProvider.refresh(this)
         if (connectingMac == mac) connectingMac = null
-        if (bootPending || startupPending || welcomeWaitingForOff) evaluateWelcomeIfReady()
-        val connection = connections[mac]
-        if (safetyFallbackActive && connection != null) {
-            sendSafetyTo(connection) { handler.postDelayed({ pumpConnectPlan() }, 180) }
+        if (safetyFallbackActive) {
+            sendSafetyToReadyLamps()
+            handler.postDelayed({ pumpConnectPlan() }, 180)
         } else {
+            if (bootPending || startupPending || welcomeWaitingForOff) evaluateWelcomeIfReady()
             handler.postDelayed({ pumpConnectPlan() }, 850)
         }
     }
 
     override fun onState(mac: String, state: QStarProtocol.LampState) {
         lampPowerState[mac] = state.power
-        if (bootPending || startupPending || welcomeWaitingForOff) evaluateWelcomeIfReady()
+        if (!safetyFallbackActive && (bootPending || startupPending || welcomeWaitingForOff)) {
+            evaluateWelcomeIfReady()
+        }
         event(
             EVENT_STATE,
             mac,
@@ -1097,12 +1157,14 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
             when (command) {
                 ControlDispatcher.CMD_PRESET -> {
                     stopStrobeInternal(restore = false)
+                    clearSafetyForCommand("remote_preset")
                     prefs.white = payload.optInt("white", prefs.white).coerceIn(0, 100)
                     latestCct = prefs.white to prefs.brightness
                     ensureConnections()
                 }
                 ControlDispatcher.CMD_APPLY -> {
                     stopStrobeInternal(restore = false)
+                    clearSafetyForCommand("remote_apply")
                     prefs.white = payload.optInt("white", prefs.white).coerceIn(0, 100)
                     prefs.brightness = payload.optInt("brightness", prefs.brightness).coerceIn(5, 100)
                     latestCct = prefs.white to prefs.brightness
@@ -1110,16 +1172,19 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
                 }
                 ControlDispatcher.CMD_POWER -> {
                     stopStrobeInternal(restore = false)
+                    clearSafetyForCommand("remote_power")
                     prefs.power = payload.optBoolean("power", prefs.power)
                     ensureConnections { sendPower(prefs.power) }
                 }
                 ControlDispatcher.CMD_BRIGHTNESS_DELTA -> {
                     stopStrobeInternal(restore = false)
+                    clearSafetyForCommand("remote_brightness")
                     prefs.brightness = (prefs.brightness + payload.optInt("delta", 0)).coerceIn(5, 100)
                     latestCct = prefs.white to prefs.brightness
                     ensureConnections()
                 }
                 ControlDispatcher.CMD_STROBE -> {
+                    clearSafetyForCommand("remote_strobe")
                     val enabled = if (payload.has("enabled")) payload.optBoolean("enabled") else !strobeActive
                     if (enabled) startStrobe() else stopStrobeInternal(restore = true)
                 }
@@ -1150,12 +1215,21 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         handler.post {
             val changed = prefs.applySyncConfig(config)
             if (changed) {
-                latestCct = prefs.white to prefs.brightness
+                clearSafetyForCommand("config_sync")
                 event(EVENT_CONFIG_SYNC, message = "config_from_phone rev=${config.optLong("revision")}")
                 QStarWidgetProvider.refresh(this)
-                ensureConnections {
-                    if (prefs.power) sendFrameAll(QStarProtocol.POWER_ON) { pumpLatestCct() }
-                    else sendFrameAll(QStarProtocol.POWER_OFF) { }
+                val welcomeOwnsStartup = welcomeInProgress || bootPending || startupPending || welcomeWaitingForOff
+                if (welcomeOwnsStartup) {
+                    // Do not let a synchronized previous UI state turn the
+                    // lamps on before the one-shot welcome has inspected them.
+                    latestCct = null
+                    ensureConnections { evaluateWelcomeIfReady() }
+                } else {
+                    latestCct = prefs.white to prefs.brightness
+                    ensureConnections {
+                        if (prefs.power) sendPower(true) { pumpLatestCct() }
+                        else sendPower(false)
+                    }
                 }
             }
             onApplied(changed)
