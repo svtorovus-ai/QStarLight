@@ -32,6 +32,8 @@ class RoleAppearanceTest {
         prefs = BlePrefs(context).also { it.ensureDefaults() }
         prefs.setLampRuntimeState(BlePrefs.LEFT_DEFAULT_MAC, RuntimeLinkState.CONNECTED)
         prefs.setLampRuntimeState(BlePrefs.RIGHT_DEFAULT_MAC, RuntimeLinkState.OFFLINE)
+        prefs.setDirectLampRuntimeState(BlePrefs.LEFT_DEFAULT_MAC, RuntimeLinkState.CONNECTED)
+        prefs.setDirectLampRuntimeState(BlePrefs.RIGHT_DEFAULT_MAC, RuntimeLinkState.OFFLINE)
     }
 
     @Test @Config(qualifiers = "+notnight")
@@ -89,6 +91,8 @@ class RoleAppearanceTest {
         assertEquals(if (light) "…\nТЕЛЕФОН" else "…\nМАФОН", root.findViewById<TextView>(R.id.widgetHubLink).text.toString())
         prefs.setLampRuntimeState(BlePrefs.LEFT_DEFAULT_MAC, RuntimeLinkState.CONNECTING)
         prefs.setLampRuntimeState(BlePrefs.RIGHT_DEFAULT_MAC, RuntimeLinkState.CONNECTED)
+        prefs.setDirectLampRuntimeState(BlePrefs.LEFT_DEFAULT_MAC, RuntimeLinkState.CONNECTING)
+        prefs.setDirectLampRuntimeState(BlePrefs.RIGHT_DEFAULT_MAC, RuntimeLinkState.CONNECTED)
         QStarWidgetProvider.refresh(context)
         val refreshed = shadow.getViewFor(id)
         assertEquals("…\nЛІВА", refreshed.findViewById<TextView>(R.id.widgetLeftLink).text.toString())
