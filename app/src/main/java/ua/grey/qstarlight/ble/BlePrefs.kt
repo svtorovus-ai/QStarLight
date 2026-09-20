@@ -144,6 +144,11 @@ class BlePrefs(private val context: Context) {
         get() = prefs.getBoolean("auto_boot", true)
         set(value) { prefs.edit().putBoolean("auto_boot", value).apply() }
 
+    /** Shared greeting profile gate. It is consumed once per BLE service restart. */
+    var welcomeOnConnect: Boolean
+        get() = prefs.getBoolean(KEY_WELCOME_ON_CONNECT, true)
+        set(value) = putSyncBoolean(KEY_WELCOME_ON_CONNECT, value)
+
     var keepConnected: Boolean
         get() = prefs.getBoolean("keep_connected", true)
         set(value) { prefs.edit().putBoolean("keep_connected", value).apply() }
@@ -376,6 +381,7 @@ class BlePrefs(private val context: Context) {
             .put("power", power)
             .put("white", white)
             .put("brightness", brightness)
+            .put("welcomeOnConnect", welcomeOnConnect)
             .put("startupMode", startupMode.name)
             .put("startWhite", startWhite)
             .put("targetWhite", targetWhite)
@@ -402,6 +408,7 @@ class BlePrefs(private val context: Context) {
             .putBoolean("power", json.optBoolean("power", power))
             .putInt("white", json.optInt("white", white).coerceIn(0, 100))
             .putInt("brightness", json.optInt("brightness", brightness).coerceIn(5, 100))
+            .putBoolean(KEY_WELCOME_ON_CONNECT, json.optBoolean("welcomeOnConnect", welcomeOnConnect))
             .putString(KEY_STARTUP_MODE, json.optString("startupMode", startupMode.name))
             .putInt(KEY_START_WHITE, json.optInt("startWhite", startWhite).coerceIn(0, 100))
             .putInt(KEY_TARGET_WHITE, json.optInt("targetWhite", targetWhite).coerceIn(0, 100))
@@ -450,6 +457,10 @@ class BlePrefs(private val context: Context) {
         prefs.edit().putString(key, value).putLong(KEY_CONFIG_REVISION, nextRevision()).putString(KEY_CONFIG_ORIGIN, deviceId).apply()
     }
 
+    private fun putSyncBoolean(key: String, value: Boolean): Unit = synchronized(CONFIG_LOCK) {
+        prefs.edit().putBoolean(key, value).putLong(KEY_CONFIG_REVISION, nextRevision()).putString(KEY_CONFIG_ORIGIN, deviceId).apply()
+    }
+
     private fun nextRevision(): Long = maxOf(System.currentTimeMillis(), configRevision + 1)
 
     private fun generatePin(): String {
@@ -468,6 +479,7 @@ class BlePrefs(private val context: Context) {
         private const val KEY_ROLE = "role"
         private const val KEY_HUB_PIN = "hub_pin"
         private const val KEY_REMOTE_PIN = "remote_pin"
+        private const val KEY_WELCOME_ON_CONNECT = "welcome_on_connect"
         private const val KEY_MANUAL_HOST = "manual_hub_host"
         private const val KEY_LAST_HOST = "last_hub_host"
         private const val KEY_LAST_HUB_CONNECTION_AT = "last_hub_connection_at"

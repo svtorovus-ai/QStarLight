@@ -47,6 +47,7 @@ class BlePrefsSyncTest {
         phone.startBrightness = 67
         phone.fadeDurationMs = 2900
         phone.fadeSteps = 36
+        phone.welcomeOnConnect = false
         phone.strobeMode = BlePrefs.StrobeMode.TRIPLE
         phone.strobeWhite = 43
         phone.strobeBrightness = 62
@@ -60,6 +61,7 @@ class BlePrefsSyncTest {
         val actual = hub.syncConfigJson()
         expected.keys().forEach { key -> assertEquals(key, expected.get(key).toString(), actual.get(key).toString()) }
         assertFalse(phone.applySyncConfig(actual))
+        assertFalse(hub.welcomeOnConnect)
     }
 
     @Test fun localEditAfterReceivingAFutureClockStillWins() {

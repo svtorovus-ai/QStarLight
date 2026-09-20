@@ -723,7 +723,7 @@
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="СТАРТ ФАР"
+                        android:text="КОНЕКТ / ВІТАННЯ"
                         android:textColor="@color/accent"
                         android:textSize="@dimen/text_section"
                         android:textStyle="bold" />
@@ -735,11 +735,20 @@
                         android:textColor="@color/text"
                         style="@style/Widget.QStar.Switch"
                         android:minHeight="@dimen/control_height" />
+                    <Switch
+                        android:id="@+id/switchWelcome"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="Вітання після першого підключення"
+                        android:textColor="@color/text"
+                        style="@style/Widget.QStar.Switch"
+                        android:minHeight="@dimen/control_height" />
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="5dp"
-                        android:text="Режим старту"
+                        android:text="Алгоритм вітання"
                         android:textColor="@color/text"
                         android:textSize="@dimen/text_small" />
                     <Spinner

@@ -457,14 +457,17 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
             prefs.markPhoneLinkAvailable()
             reconcilePhoneLifetime()
         }
-        if (prefs.role() == BlePrefs.Role.HUB && (bootPending || startupPending)) {
+        val greetingPending = bootPending || startupPending
+        if (greetingPending) {
             bootPending = false
             startupPending = false
             // A real lamp power cycle must obey the configured startup profile, not the
             // temporary white-100 failsafe used while a single lamp is missing.
             safetyFallbackActive = false
-            runBootRoutine()
-            return
+            if (prefs.welcomeOnConnect && prefs.devices().size >= 2 && !prefs.power) {
+                runBootRoutine()
+                return
+            }
         }
         if (safetyFallbackActive) {
             sendFrameAll(QStarProtocol.POWER_ON) {
@@ -903,10 +906,6 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         val wasReady = readyMacs.remove(mac)
         if (connectingMac == mac) connectingMac = null
         if ((wasReady || pairWasReady) && !remoteTakeover) activateSafetyFallback("error:$message")
-        if (prefs.role() == BlePrefs.Role.HUB && readyMacs.isEmpty() && !remoteTakeover) {
-            startupPending = true
-            pairWasReady = false
-        }
         if (!remoteTakeover) scheduleReconnect(120)
     }
 
@@ -925,12 +924,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         val wasReady = readyMacs.remove(mac)
         if (connectingMac == mac) connectingMac = null
         if ((wasReady || pairWasReady) && !remoteTakeover) activateSafetyFallback("disconnect:$status")
-        if (prefs.role() == BlePrefs.Role.HUB && readyMacs.isEmpty() && !remoteTakeover) {
-            // Controllers can reboot and advertise again in well under four seconds.
-            // Arm startup immediately so the selected startup profile wins over firmware's last state.
-            startupPending = true
-            pairWasReady = false
-        }
+        if (prefs.role() == BlePrefs.Role.HUB && readyMacs.isEmpty() && !remoteTakeover) pairWasReady = false
         if (!remoteTakeover) scheduleReconnect(120)
     }
 

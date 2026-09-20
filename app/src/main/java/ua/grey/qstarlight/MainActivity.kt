@@ -125,6 +125,7 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var switchPower: Switch
     private lateinit var switchAutoBoot: Switch
+    private lateinit var switchWelcome: Switch
     private lateinit var switchKeep: Switch
     private lateinit var switchDirectFallback: Switch
     private lateinit var switchForceDirect: Switch
@@ -158,6 +159,7 @@ class MainActivity : AppCompatActivity() {
     private var pendingLogExport: String? = null
     private var logAutoScroll = true
     private var logTouching = false
+    private var logTouchGeneration = 0L
     private var suppressLogScrollState = false
     private var strobeBlink: AlphaAnimation? = null
     private val strobeStatusTicker = object : Runnable {
@@ -288,6 +290,7 @@ class MainActivity : AppCompatActivity() {
 
         switchPower = findViewById(R.id.switchPower)
         switchAutoBoot = findViewById(R.id.switchAutoBoot)
+        switchWelcome = findViewById(R.id.switchWelcome)
         switchKeep = findViewById(R.id.switchKeep)
         switchDirectFallback = findViewById(R.id.switchDirectFallback)
         switchForceDirect = findViewById(R.id.switchForceDirect)
@@ -313,7 +316,7 @@ class MainActivity : AppCompatActivity() {
         btnPushUpdate = findViewById(R.id.btnPushUpdate)
         btnInstallPermission = findViewById(R.id.btnInstallPermission)
         diagnosticsLogScroll.setOnScrollChangeListener { view, _, scrollY, _, _ ->
-            if (!suppressLogScrollState) {
+            if (!suppressLogScrollState && !logTouching) {
                 val scroll = view as ScrollView
                 val child = scroll.getChildAt(0)
                 logAutoScroll = child == null || scrollY + scroll.height >= child.height - 16.dp()
@@ -324,6 +327,7 @@ class MainActivity : AppCompatActivity() {
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     // Stop the refresh runnable from fighting the finger immediately.
+                    logTouchGeneration++
                     logTouching = true
                     logAutoScroll = false
                 }
@@ -331,6 +335,7 @@ class MainActivity : AppCompatActivity() {
                     logTouching = false
                     val child = scroll.getChildAt(0)
                     logAutoScroll = child == null || scroll.scrollY + scroll.height >= child.height - 16.dp()
+                    handler.post { if (currentPage == 2) renderDiagnostics() }
                 }
             }
             false
@@ -390,6 +395,7 @@ class MainActivity : AppCompatActivity() {
         switchPower.isChecked = prefs.power
 
         switchAutoBoot.isChecked = prefs.autoBoot
+        switchWelcome.isChecked = prefs.welcomeOnConnect
         switchKeep.isChecked = prefs.keepConnected
         switchDirectFallback.isChecked = prefs.directFallback
         switchForceDirect.isChecked = prefs.forceDirect
@@ -545,6 +551,12 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btnPasswords).setOnClickListener { showPasswordDialog() }
 
         switchAutoBoot.setOnCheckedChangeListener { _, v -> if (!updatingUi) prefs.autoBoot = v }
+        switchWelcome.setOnCheckedChangeListener { _, v ->
+            if (!updatingUi) {
+                prefs.welcomeOnConnect = v
+                scheduleConfigSync()
+            }
+        }
         switchKeep.setOnCheckedChangeListener { _, v -> if (!updatingUi) prefs.keepConnected = v }
         switchDirectFallback.setOnCheckedChangeListener { _, v -> if (!updatingUi) prefs.directFallback = v }
         switchRemoteKeepAlive.setOnCheckedChangeListener { _, v -> if (!updatingUi) prefs.remoteKeepAlive = v }
@@ -1314,6 +1326,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun renderDiagnostics() {
         val log = DiagnosticLog.snapshot()
+        if (logTouching) return
         val deviceLines = prefs.devices().map { device ->
             "${prefs.lampSide(device)}: ${formatConnectionTimestamp(prefs.lastLampConnectionAt(device.mac))}"
         }.joinToString("\n")
@@ -1329,13 +1342,23 @@ class MainActivity : AppCompatActivity() {
         if (textChanged) tvLog.text = renderedLog
         if (followTail) {
             suppressLogScrollState = true
+            val generation = logTouchGeneration
             diagnosticsLogScroll.post {
+                if (generation != logTouchGeneration) {
+                    suppressLogScrollState = false
+                    return@post
+                }
                 if (!logTouching && logAutoScroll) diagnosticsLogScroll.fullScroll(View.FOCUS_DOWN)
                 suppressLogScrollState = false
             }
         } else if (textChanged) {
             suppressLogScrollState = true
+            val generation = logTouchGeneration
             diagnosticsLogScroll.post {
+                if (generation != logTouchGeneration) {
+                    suppressLogScrollState = false
+                    return@post
+                }
                 val child = diagnosticsLogScroll.getChildAt(0)
                 val maxY = ((child?.height ?: 0) - diagnosticsLogScroll.height).coerceAtLeast(0)
                 diagnosticsLogScroll.scrollTo(0, oldScrollY.coerceIn(0, maxY))
