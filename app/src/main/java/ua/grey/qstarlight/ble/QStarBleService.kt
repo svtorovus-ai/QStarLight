@@ -114,6 +114,9 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
             if (!prefs.anyPhoneLinkConnected() && !prefs.phoneOfflineGraceActive()) prefs.startPhoneOfflineGrace()
             reconcilePhoneLifetime()
         }
+        if (prefs.role() == BlePrefs.Role.HUB && remoteTakeover && relayHeadUnitCommand(intent)) {
+            return if (interactive && !oneShot) START_STICKY else START_NOT_STICKY
+        }
         when (intent.action) {
             ACTION_SCAN -> {
                 startForegroundSafe("Scanning QStar")
@@ -122,6 +125,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
             ACTION_HUB_START -> {
                 interactive = true
                 oneShot = false
+                armWelcomeCycle("hub_start")
                 startForegroundSafe("Магнітола • QStar hub")
                 ensureHubTransport()
                 if (!remoteTakeover) ensureConnections()
@@ -129,6 +133,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
             ACTION_CONNECT -> {
                 interactive = true
                 oneShot = false
+                armWelcomeCycle("connect")
                 startForegroundSafe(if (prefs.role() == BlePrefs.Role.HUB) "Магнітола • QStar" else "Прямий BLE • QStar")
                 if (prefs.role() == BlePrefs.Role.HUB) ensureHubTransport()
                 if (!remoteTakeover) ensureConnections()
@@ -219,7 +224,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
                     oneShot = true
                 }
                 bootPending = true
-                startupPending = true
+                armWelcomeCycle("boot")
                 startForegroundSafe("Відновлення QStar")
                 startScan(4_000) { if (!remoteTakeover) ensureConnections() }
             }
@@ -232,6 +237,44 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         if (hubTransport == null) hubTransport = HubTransport(this, prefs, this)
         hubTransport?.start()
         hubTransport?.publishStatus(if (remoteTakeover) "Телефон керує напряму" else "Магнітола керує лампами")
+    }
+
+    private fun armWelcomeCycle(reason: String) {
+        if (welcomeInProgress) return
+        startupPending = true
+        welcomeWaitingForOff = false
+        welcomeStateAttempts = 0
+        welcomeCheckScheduled = false
+        safetyFallbackActive = false
+        safetyWriteInFlight = false
+        safetyArmedAtElapsed = SystemClock.elapsedRealtime() + 2_500L
+        DiagnosticLog.write("WELCOME", "armed reason=$reason")
+    }
+
+    private fun relayHeadUnitCommand(intent: Intent): Boolean {
+        val action = intent.action ?: return false
+        val command = when (action) {
+            ACTION_PRESET -> ControlDispatcher.CMD_PRESET
+            ACTION_APPLY -> ControlDispatcher.CMD_APPLY
+            ACTION_POWER -> ControlDispatcher.CMD_POWER
+            ACTION_BRIGHTNESS_DELTA -> ControlDispatcher.CMD_BRIGHTNESS_DELTA
+            ACTION_STROBE -> ControlDispatcher.CMD_STROBE
+            ACTION_CONNECT -> ControlDispatcher.CMD_CONNECT
+            ACTION_CONNECT_DEVICE -> ControlDispatcher.CMD_CONNECT_DEVICE
+            else -> return false
+        }
+        val payload = JSONObject()
+        if (intent.hasExtra(EXTRA_WHITE)) payload.put("white", intent.getIntExtra(EXTRA_WHITE, prefs.white))
+        if (intent.hasExtra(EXTRA_BRIGHTNESS)) payload.put("brightness", intent.getIntExtra(EXTRA_BRIGHTNESS, prefs.brightness))
+        if (intent.hasExtra(EXTRA_POWER)) payload.put("power", intent.getBooleanExtra(EXTRA_POWER, prefs.power))
+        if (intent.hasExtra(EXTRA_DELTA)) payload.put("delta", intent.getIntExtra(EXTRA_DELTA, 0))
+        if (intent.hasExtra(EXTRA_STROBE_ENABLED)) payload.put("enabled", intent.getBooleanExtra(EXTRA_STROBE_ENABLED, false))
+        if (intent.hasExtra(EXTRA_MAC)) payload.put("mac", intent.getStringExtra(EXTRA_MAC).orEmpty())
+        val sent = hubTransport?.sendTakeoverCommand(command, payload) == true
+        DiagnosticLog.write("BLE SERVICE", "relay_head_unit command=$command sent=$sent")
+        event(EVENT_PHASE, message=if (sent) "command_relayed:$command" else "command_relay_failed:$command")
+        // Never fall back to the HUB's own BLE while takeover is active.
+        return true
     }
 
     private fun disconnectAll() {
@@ -809,6 +852,8 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
 
     private fun finishBootRoutine() {
         welcomeInProgress = false
+        bootPending = false
+        startupPending = false
         welcomeWaitingForOff = false
         if (prefs.role() == BlePrefs.Role.HUB) hubTransport?.publishStatus("QStar готові") else shutdownSoon()
     }
@@ -1204,6 +1249,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
                 event(EVENT_PHASE, message = "remote_direct_takeover")
             } else {
                 interactive = true
+                armWelcomeCycle("hub_resume")
                 event(EVENT_PHASE, message = "hub_control_resumed")
                 ensureConnections()
             }

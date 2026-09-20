@@ -395,6 +395,24 @@ class RemoteLinkService : Service() {
                     json.optJSONObject("config")?.let { receiveHubConfig(it, host) }
                 }
                 "config_sync" -> json.optJSONObject("config")?.let { receiveHubConfig(it, host) }
+                "command" -> {
+                    // The HUB is the UI/controller, while this phone owns the
+                    // direct BLE links. Execute the relayed command locally;
+                    // do not send it back through the HUB or create a loop.
+                    val command = json.optString("command").trim()
+                    if (command.isBlank()) return
+                    val intent = Intent()
+                        .putExtra(EXTRA_COMMAND, command)
+                    if (json.has("white")) intent.putExtra(EXTRA_WHITE, json.optInt("white", prefs.white))
+                    if (json.has("brightness")) intent.putExtra(EXTRA_BRIGHTNESS, json.optInt("brightness", prefs.brightness))
+                    if (json.has("power")) intent.putExtra(EXTRA_POWER, json.optBoolean("power", prefs.power))
+                    if (json.has("delta")) intent.putExtra(EXTRA_DELTA, json.optInt("delta", 0))
+                    if (json.has("enabled")) intent.putExtra(EXTRA_STROBE, json.optBoolean("enabled", false))
+                    if (json.has("mac")) intent.putExtra(EXTRA_MAC, json.optString("mac"))
+                    dispatchDirect(intent)
+                    sendLine(JSONObject().put("type", "ack").put("message", "command_relayed").put("command", command))
+                    broadcast(EVENT_ROUTE, "Команда з мафону передана телефону", host, line)
+                }
                 "ble" -> {
                     val mac = json.optString("mac")
                     val event = json.optString("event")

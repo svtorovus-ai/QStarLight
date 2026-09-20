@@ -114,6 +114,23 @@ class HubTransport(
         clients.forEach { sendConfig(it) }
     }
 
+    /**
+     * Forward a command from the head unit to the phone that currently owns
+     * the direct BLE takeover.  The hub must remain the command ingress even
+     * while it has released its own GATT links.
+     */
+    fun sendTakeoverCommand(command: String, payload: JSONObject = JSONObject()): Boolean {
+        val ownerId = takeoverOwner ?: return false
+        val client = clients.firstOrNull { it.id == ownerId } ?: return false
+        val relay = JSONObject(payload.toString())
+            .put("type", "command")
+            .put("command", command)
+            .put("source", "head_unit")
+        send(client, relay)
+        DiagnosticLog.write("HUB", "relay command=$command owner=$ownerId")
+        return true
+    }
+
     private fun tcpLoop() {
         try {
             ServerSocket().use { server ->
