@@ -181,7 +181,7 @@
         android:orientation="vertical">
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="48dp"
+            android:layout_height="56dp"
             android:orientation="horizontal"
             android:baselineAligned="false">
             <TextView
@@ -191,7 +191,7 @@
                 android:layout_weight="1"
                 android:gravity="center"
                 android:text="▬"
-                android:textSize="26sp"
+                android:textSize="32sp"
                 android:contentDescription="Яскравість 10%" />
             <TextView
                 android:id="@+id/b20"
@@ -232,7 +232,7 @@
         </LinearLayout>
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="48dp"
+            android:layout_height="56dp"
             android:orientation="horizontal"
             android:baselineAligned="false">
             <TextView
@@ -242,7 +242,7 @@
                 android:layout_weight="1"
                 android:gravity="center"
                 android:text="▬"
-                android:textSize="26sp"
+                android:textSize="32sp"
                 android:contentDescription="Яскравість 60%" />
             <TextView
                 android:id="@+id/b70"

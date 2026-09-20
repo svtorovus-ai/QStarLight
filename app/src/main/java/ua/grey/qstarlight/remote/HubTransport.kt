@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Build
 import org.json.JSONObject
 import ua.grey.qstarlight.ble.BlePrefs
+import ua.grey.qstarlight.ble.QStarBleService
 import ua.grey.qstarlight.update.UpdateManager
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
@@ -56,6 +57,7 @@ class HubTransport(
 
     fun start() {
         if (!running.compareAndSet(false, true)) return
+        setPhoneLinkState(BlePrefs.RuntimeLinkState.OFFLINE)
         sender.scheduleWithFixedDelay({
             clients.filter { it.pendingVersion != null }.forEach { sendConfig(it) }
         }, 1400, 1400, TimeUnit.MILLISECONDS)
@@ -72,6 +74,7 @@ class HubTransport(
         clients.forEach { try { it.socket.close() } catch (_: Throwable) { } }
         clients.clear()
         takeoverOwner = null
+        setPhoneLinkState(BlePrefs.RuntimeLinkState.OFFLINE)
         sender.shutdownNow()
     }
 
@@ -157,6 +160,7 @@ class HubTransport(
                     .put("versionName", UpdateManager.versionName(context))
             )
             clients += peer
+            setPhoneLinkState(BlePrefs.RuntimeLinkState.CONNECTED)
             DiagnosticLog.write("HUB", "Client authorized: $id; version=${hello.optString("versionName")}")
             sendStatus(peer, "Магнітола готова")
             sendConfig(peer)
@@ -237,7 +241,10 @@ class HubTransport(
             client?.let {
                 clients.remove(it)
                 DiagnosticLog.write("HUB", "Client disconnected: ${it.id}")
-                if (clients.isEmpty()) ConfigSyncStatus.waiting("Телефон відключено • очікую з’єднання")
+                if (clients.isEmpty()) {
+                    setPhoneLinkState(BlePrefs.RuntimeLinkState.OFFLINE)
+                    ConfigSyncStatus.waiting("Телефон відключено • очікую з’єднання")
+                }
             }
             try { socket.close() } catch (_: Throwable) { }
             val ownerId = takeoverOwner
@@ -295,6 +302,17 @@ class HubTransport(
 
     private fun broadcast(json: JSONObject) {
         clients.forEach { send(it, json) }
+    }
+
+    private fun setPhoneLinkState(state: BlePrefs.RuntimeLinkState) {
+        prefs.hubRuntimeState = state
+        QStarWidgetProvider.refresh(context)
+        context.sendBroadcast(
+            android.content.Intent(QStarBleService.ACTION_EVENT)
+                .setPackage(context.packageName)
+                .putExtra(QStarBleService.EXTRA_EVENT, QStarBleService.EVENT_PHONE_LINK)
+                .putExtra(QStarBleService.EXTRA_MESSAGE, state.name)
+        )
     }
 
     private fun discoveryLoop() {

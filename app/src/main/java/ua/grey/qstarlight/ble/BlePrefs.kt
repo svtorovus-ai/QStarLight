@@ -113,6 +113,11 @@ class BlePrefs(private val context: Context) {
         get() = prefs.getBoolean("power", true)
         set(value) { prefs.edit().putBoolean("power", value).apply() }
 
+    /** Runtime-only state used by the activity and widget to show an active strobe. */
+    var strobeActive: Boolean
+        get() = prefs.getBoolean("strobe_active", false)
+        set(value) { prefs.edit().putBoolean("strobe_active", value).apply() }
+
     fun updateLight(white: Int? = null, brightness: Int? = null, power: Boolean? = null): Unit = synchronized(CONFIG_LOCK) {
         val editor = prefs.edit()
         white?.let { editor.putInt("white", it.coerceIn(0, 100)) }

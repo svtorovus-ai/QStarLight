@@ -110,7 +110,7 @@ class TouchLayoutTest {
     }
 
     @Test @Config(qualifiers = "w400dp-h800dp-notnight-mdpi")
-    fun phoneWidgetKeepsCompactControlsAndLargeSignsWhenRoleChanges() {
+    fun widgetKeepsLargeControlsAndLargeSignsWhenRoleChanges() {
         val context = RuntimeEnvironment.getApplication()
         context.getSharedPreferences("qstar_prefs", Context.MODE_PRIVATE).edit().clear().commit()
         val prefs = BlePrefs(context).also { it.ensureDefaults(); it.roleOverride = "phone" }
@@ -118,9 +118,9 @@ class TouchLayoutTest {
         val manager = shadowOf(AppWidgetManager.getInstance(context))
         val id = manager.createWidget(QStarWidgetProvider::class.java, R.layout.widget_qstar)
         val root = manager.getViewFor(id)
-        measure(root, 360, 248)
+        measure(root, 360, 360)
         listOf(R.id.widgetYellow, R.id.widgetWarm, R.id.widgetWhite, R.id.widgetStrobe).forEach {
-            assertEquals(46, root.findViewById<View>(it).height)
+            assertEquals(64, root.findViewById<View>(it).height)
         }
         listOf(R.id.widgetLeftLink, R.id.widgetHubLink, R.id.widgetRightLink).forEach {
             val view = root.findViewById<TextView>(it)
@@ -129,8 +129,8 @@ class TouchLayoutTest {
         }
         val first = root.findViewById<View>(R.id.b10)
         val last = root.findViewById<View>(R.id.b100)
-        assertSame(first.parent, last.parent)
-        assertEquals(28, last.height)
+        assertNotSame(first.parent, last.parent)
+        assertEquals(56, last.height)
         val position = IntArray(2).also(last::getLocationOnScreen)
         assertTrue(position[1] + last.height <= root.height)
         assertButtonTextFits(root)
@@ -146,9 +146,9 @@ class TouchLayoutTest {
         prefs.roleOverride = "phone"
         QStarWidgetProvider.refresh(context)
         val phoneRoot = manager.getViewFor(id)
-        measure(phoneRoot, 360, 248)
-        assertEquals(46, phoneRoot.findViewById<View>(R.id.widgetYellow).height)
-        assertSame(phoneRoot.findViewById<View>(R.id.b10).parent, phoneRoot.findViewById<View>(R.id.b100).parent)
+        measure(phoneRoot, 360, 360)
+        assertEquals(64, phoneRoot.findViewById<View>(R.id.widgetYellow).height)
+        assertNotSame(phoneRoot.findViewById<View>(R.id.b10).parent, phoneRoot.findViewById<View>(R.id.b100).parent)
     }
 
     private fun assertButtonTextFits(view: View) {

@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.util.TypedValue
 import android.widget.RemoteViews
+import android.os.SystemClock
 import androidx.core.content.ContextCompat
 import ua.grey.qstarlight.MainActivity
 import ua.grey.qstarlight.R
@@ -21,9 +22,13 @@ class QStarWidgetProvider : AppWidgetProvider() {
         ids.forEach { id ->
             val light = prefs.role() == BlePrefs.Role.HUB
             // Size follows the device role, regardless of the launcher's theme or screen size.
-            val layout = if (light) R.layout.widget_qstar else R.layout.widget_qstar_phone
+            // The widget is intentionally the large control surface for both roles.
+            // The phone app itself remains compact; only the launcher widget is large.
+            val layout = R.layout.widget_qstar
             val views = RemoteViews(context.packageName, layout)
-            applyTheme(context, views, light)
+            val strobeActive = prefs.strobeActive
+            val strobeBlinkOn = strobeActive && (SystemClock.elapsedRealtime() / 450L) % 2L == 0L
+            applyTheme(context, views, light, strobeActive, strobeBlinkOn)
             val colorName = when {
                 prefs.white <= 15 -> "Жовтий"
                 prefs.white >= 85 -> "Білий"
@@ -39,13 +44,9 @@ class QStarWidgetProvider : AppWidgetProvider() {
             val right = devices.firstOrNull {
                 it.name.equals(BlePrefs.RIGHT_NAME, true) || it.mac.equals(BlePrefs.RIGHT_DEFAULT_MAC, true)
             }
-            val hubState = if (prefs.role() == BlePrefs.Role.HUB) {
-                BlePrefs.RuntimeLinkState.CONNECTED
-            } else {
-                prefs.hubRuntimeState
-            }
+            val hubState = prefs.hubRuntimeState
 
-            applyLink(context, views, light, R.id.widgetHubLink, "МАФОН", hubState)
+            applyLink(context, views, light, R.id.widgetHubLink, if (light) "ТЕЛЕФОН" else "МАФОН", hubState)
             applyLink(
                 context, views, light,
                 R.id.widgetLeftLink,
@@ -87,6 +88,8 @@ class QStarWidgetProvider : AppWidgetProvider() {
             }
             manager.updateAppWidget(id, views)
         }
+        if (prefs.strobeActive) scheduleBlink(context)
+        else blinkHandler.removeCallbacksAndMessages(null)
     }
 
     private fun applyLink(
@@ -97,14 +100,20 @@ class QStarWidgetProvider : AppWidgetProvider() {
         label: String,
         state: BlePrefs.RuntimeLinkState
     ) {
-        val labelSize = if (light) 14f else 12f
+        val labelSize = 16f
         views.setTextViewTextSize(viewId, TypedValue.COMPLEX_UNIT_SP, labelSize)
-        views.setTextViewText(viewId, LinkIndicator.label(state, label, (if (light) 40f else 36f) / labelSize, stacked = true))
+        views.setTextViewText(viewId, LinkIndicator.label(state, label, 50f / labelSize, stacked = true))
         views.setTextColor(viewId, LinkIndicator.color(context, state, light))
         views.setContentDescription(viewId, "$label • ${LinkIndicator.description(state)}")
     }
 
-    private fun applyTheme(context: Context, views: RemoteViews, light: Boolean) {
+    private fun applyTheme(
+        context: Context,
+        views: RemoteViews,
+        light: Boolean,
+        strobeActive: Boolean,
+        strobeBlinkOn: Boolean
+    ) {
         // RemoteViews is inflated by the launcher, so do not depend on its night-mode resources.
         val backgrounds = mapOf(
             R.id.widgetRoot to if (light) R.drawable.widget_bg_light else R.drawable.widget_bg,
@@ -115,7 +124,9 @@ class QStarWidgetProvider : AppWidgetProvider() {
             R.id.widgetYellow to if (light) R.drawable.widget_button_gold_light else R.drawable.widget_button_gold,
             R.id.widgetWarm to if (light) R.drawable.widget_button_warm_light else R.drawable.widget_button_warm,
             R.id.widgetWhite to if (light) R.drawable.widget_button_white_light else R.drawable.widget_button_white,
-            R.id.widgetStrobe to if (light) R.drawable.widget_button_dark_light else R.drawable.widget_button_dark
+            R.id.widgetStrobe to if (strobeActive && strobeBlinkOn) {
+                if (light) R.drawable.widget_button_dark_active_light else R.drawable.widget_button_dark_active
+            } else if (light) R.drawable.widget_button_dark_light else R.drawable.widget_button_dark
         )
         backgrounds.forEach { (id, drawable) -> views.setInt(id, "setBackgroundResource", drawable) }
         val colors = mapOf(
@@ -128,12 +139,28 @@ class QStarWidgetProvider : AppWidgetProvider() {
             R.id.widgetStrobe to if (light) R.color.widget_light_accent else R.color.widget_dark_accent
         )
         colors.forEach { (id, color) -> views.setTextColor(id, ContextCompat.getColor(context, color)) }
-        views.setTextViewTextSize(R.id.widgetTitle, TypedValue.COMPLEX_UNIT_SP, if (light) 18f else 14f)
-        views.setTextViewTextSize(R.id.widgetStatus, TypedValue.COMPLEX_UNIT_SP, if (light) 14f else 10f)
-        views.setTextViewTextSize(R.id.widgetBrightnessLabel, TypedValue.COMPLEX_UNIT_SP, if (light) 14f else 10f)
+        views.setTextViewTextSize(R.id.widgetTitle, TypedValue.COMPLEX_UNIT_SP, 20f)
+        views.setTextViewTextSize(R.id.widgetStatus, TypedValue.COMPLEX_UNIT_SP, 16f)
+        views.setTextViewTextSize(R.id.widgetBrightnessLabel, TypedValue.COMPLEX_UNIT_SP, 16f)
         listOf(R.id.widgetYellow, R.id.widgetWarm, R.id.widgetWhite).forEach {
-            views.setTextViewTextSize(it, TypedValue.COMPLEX_UNIT_SP, if (light) 14f else 10f)
+            views.setTextViewTextSize(it, TypedValue.COMPLEX_UNIT_SP, 16f)
         }
+        val activeWhite = BlePrefs(context).white
+        views.setInt(R.id.widgetYellow, "setBackgroundResource", if (activeWhite <= 15) {
+            if (light) R.drawable.widget_button_gold_active_light else R.drawable.widget_button_gold_active
+        } else if (light) R.drawable.widget_button_gold_light else R.drawable.widget_button_gold)
+        views.setInt(R.id.widgetWarm, "setBackgroundResource", if (activeWhite in 16..84) {
+            if (light) R.drawable.widget_button_warm_active_light else R.drawable.widget_button_warm_active
+        } else if (light) R.drawable.widget_button_warm_light else R.drawable.widget_button_warm)
+        views.setInt(R.id.widgetWhite, "setBackgroundResource", if (activeWhite >= 85) {
+            if (light) R.drawable.widget_button_white_active_light else R.drawable.widget_button_white_active
+        } else if (light) R.drawable.widget_button_white_light else R.drawable.widget_button_white)
+    }
+
+    private fun scheduleBlink(context: Context) {
+        blinkHandler.removeCallbacksAndMessages(null)
+        val appContext = context.applicationContext
+        blinkHandler.postDelayed({ refresh(appContext) }, 450L)
     }
 
     private fun openAppIntent(context: Context): PendingIntent =
@@ -189,6 +216,8 @@ class QStarWidgetProvider : AppWidgetProvider() {
         )
 
     companion object {
+        private val blinkHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
         fun refresh(context: Context) {
             val manager = AppWidgetManager.getInstance(context)
             val component = ComponentName(context, QStarWidgetProvider::class.java)

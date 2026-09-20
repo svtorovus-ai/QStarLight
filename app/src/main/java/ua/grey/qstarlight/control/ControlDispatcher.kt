@@ -43,47 +43,69 @@ object ControlDispatcher {
 
     fun preset(context: Context, white: Int) {
         val prefs = BlePrefs(context).also { it.ensureDefaults() }
+        prefs.strobeActive = false
         prefs.white = white
         prefs.strobeWhite = white
         dispatch(context, CMD_PRESET, white = white)
         configChanged(context)
+        notifyUi(context)
         QStarWidgetProvider.refresh(context)
     }
 
     fun apply(context: Context, white: Int, brightness: Int) {
         val prefs = BlePrefs(context).also { it.ensureDefaults() }
+        prefs.strobeActive = false
         prefs.updateLight(white = white, brightness = brightness)
         dispatch(context, CMD_APPLY, white = white, brightness = brightness)
         configChanged(context)
+        notifyUi(context)
         QStarWidgetProvider.refresh(context)
     }
 
     fun power(context: Context, on: Boolean) {
         val prefs = BlePrefs(context).also { it.ensureDefaults() }
+        prefs.strobeActive = false
         prefs.updateLight(power = on)
         dispatch(context, CMD_POWER, power = on)
         configChanged(context)
+        notifyUi(context)
         QStarWidgetProvider.refresh(context)
     }
 
     fun brightnessSet(context: Context, value: Int) {
         val prefs = BlePrefs(context).also { it.ensureDefaults() }
+        prefs.strobeActive = false
         prefs.updateLight(brightness = value)
         dispatch(context, CMD_APPLY, white = prefs.white, brightness = prefs.brightness)
         configChanged(context)
+        notifyUi(context)
         QStarWidgetProvider.refresh(context)
     }
 
     fun brightnessDelta(context: Context, delta: Int) {
         val prefs = BlePrefs(context).also { it.ensureDefaults() }
+        prefs.strobeActive = false
         prefs.updateLight(brightness = prefs.brightness + delta)
         dispatch(context, CMD_BRIGHTNESS_DELTA, delta = delta)
         configChanged(context)
+        notifyUi(context)
         QStarWidgetProvider.refresh(context)
     }
 
     fun strobe(context: Context, enabled: Boolean? = null) {
+        val prefs = BlePrefs(context).also { it.ensureDefaults() }
+        prefs.strobeActive = enabled ?: !prefs.strobeActive
         dispatch(context, CMD_STROBE, strobe = enabled)
+        notifyUi(context)
+        QStarWidgetProvider.refresh(context)
+    }
+
+    private fun notifyUi(context: Context) {
+        context.sendBroadcast(
+            Intent(QStarBleService.ACTION_EVENT)
+                .setPackage(context.packageName)
+                .putExtra(QStarBleService.EXTRA_EVENT, QStarBleService.EVENT_UI_STATE)
+        )
     }
 
     fun scanDirect(context: Context) {

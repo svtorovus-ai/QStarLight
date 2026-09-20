@@ -181,6 +181,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
                 val requested = if (intent.hasExtra(EXTRA_STROBE_ENABLED)) {
                     intent.getBooleanExtra(EXTRA_STROBE_ENABLED, false)
                 } else !strobeActive
+                prefs.strobeActive = requested
                 startForegroundSafe(if (requested) "Стробоскоп" else "QStar")
                 if (requested) startStrobe() else stopStrobeInternal(restore = true)
             }
@@ -659,6 +660,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         oneShot = false
         interactive = true
         strobeActive = true
+        prefs.strobeActive = true
         strobeGeneration++
         val generation = strobeGeneration
         ensureConnections {
@@ -685,6 +687,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
     private fun stopStrobeInternal(restore: Boolean) {
         if (!strobeActive && !restore) return
         strobeActive = false
+        prefs.strobeActive = false
         strobeGeneration++
         event(EVENT_STROBE, message = "strobe_off")
         if (restore) {
@@ -1120,6 +1123,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
 
     override fun onDestroy() {
         strobeActive = false
+        prefs.strobeActive = false
         strobeGeneration++
         hubTransport?.stop()
         hubTransport = null
@@ -1165,6 +1169,8 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         const val EVENT_ERROR = "error"
         const val EVENT_DISCONNECTED = "disconnected"
         const val EVENT_STROBE = "strobe"
+        const val EVENT_PHONE_LINK = "phone_link"
+        const val EVENT_UI_STATE = "ui_state"
         const val EVENT_CONFIG_SYNC = "config_sync"
         const val EVENT_UPDATE = "update"
 

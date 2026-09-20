@@ -25,6 +25,8 @@ import android.view.View
 import android.view.MotionEvent
 import android.view.ViewConfiguration
 import android.view.VelocityTracker
+import android.view.animation.AlphaAnimation
+import android.view.animation.Animation
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
@@ -72,7 +74,8 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var controlPage: ScrollView
     private lateinit var settingsPage: ScrollView
-    private lateinit var diagnosticsPage: ScrollView
+    private lateinit var diagnosticsPage: View
+    private lateinit var diagnosticsLogScroll: ScrollView
     private lateinit var tabDiagnostics: Button
     private lateinit var tvDiagnosticsInfo: TextView
     private lateinit var tvLogCount: TextView
@@ -139,6 +142,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnRouteHub: Button
     private lateinit var btnRouteDirect: Button
     private lateinit var btnStrobeToggle: Button
+    private lateinit var btnYellow: Button
+    private lateinit var btnWarm: Button
+    private lateinit var btnWhite: Button
     private lateinit var btnPushUpdate: Button
     private lateinit var btnInstallPermission: Button
 
@@ -148,6 +154,9 @@ class MainActivity : AppCompatActivity() {
     @Volatile private var activityStarted = false
     private val logRefreshScheduled = AtomicBoolean(false)
     private var pendingLogExport: String? = null
+    private var logAutoScroll = true
+    private var suppressLogScrollState = false
+    private var strobeBlink: AlphaAnimation? = null
     private val logRefresh = Runnable {
         logRefreshScheduled.set(false)
         updateSyncStatus()
@@ -220,6 +229,7 @@ class MainActivity : AppCompatActivity() {
         controlPage = findViewById(R.id.controlPage)
         settingsPage = findViewById(R.id.settingsPage)
         diagnosticsPage = findViewById(R.id.diagnosticsPage)
+        diagnosticsLogScroll = findViewById(R.id.diagnosticsLogScroll)
         tabDiagnostics = findViewById(R.id.tabDiagnostics)
         tvDiagnosticsInfo = findViewById(R.id.tvDiagnosticsInfo)
         tvLogCount = findViewById(R.id.tvLogCount)
@@ -286,8 +296,18 @@ class MainActivity : AppCompatActivity() {
         btnRouteHub = findViewById(R.id.btnRouteHub)
         btnRouteDirect = findViewById(R.id.btnRouteDirect)
         btnStrobeToggle = findViewById(R.id.btnStrobeToggle)
+        btnYellow = findViewById(R.id.btnYellow)
+        btnWarm = findViewById(R.id.btnWarm)
+        btnWhite = findViewById(R.id.btnWhite)
         btnPushUpdate = findViewById(R.id.btnPushUpdate)
         btnInstallPermission = findViewById(R.id.btnInstallPermission)
+        diagnosticsLogScroll.setOnScrollChangeListener { view, _, scrollY, _, _ ->
+            if (!suppressLogScrollState) {
+                val scroll = view as ScrollView
+                val child = scroll.getChildAt(0)
+                logAutoScroll = child == null || scrollY + scroll.height >= child.height - 16.dp()
+            }
+        }
     }
 
     private fun configureUi() {
@@ -324,6 +344,7 @@ class MainActivity : AppCompatActivity() {
         seekStrobePause.max = 2000
 
         refreshAllControlsFromPrefs()
+        strobeOnUi = prefs.strobeActive
         updatingUi = false
         showPage(0)
         updateRoleUi()
@@ -417,9 +438,9 @@ class MainActivity : AppCompatActivity() {
         tvRemoteStatus.setOnClickListener { retryHubConnection() }
         tvLamp1.setOnClickListener { retryLamp(0) }
         tvLamp2.setOnClickListener { retryLamp(1) }
-        findViewById<Button>(R.id.btnYellow).setOnClickListener { setPreset(0) }
-        findViewById<Button>(R.id.btnWarm).setOnClickListener { setPreset(50) }
-        findViewById<Button>(R.id.btnWhite).setOnClickListener { setPreset(100) }
+        btnYellow.setOnClickListener { setPreset(0) }
+        btnWarm.setOnClickListener { setPreset(50) }
+        btnWhite.setOnClickListener { setPreset(100) }
         findViewById<Button>(R.id.btnBrightnessDown).setOnClickListener {
             ControlDispatcher.brightnessDelta(this, -10)
             refreshFromPrefsDelayed()
@@ -631,7 +652,7 @@ class MainActivity : AppCompatActivity() {
         super.onSaveInstanceState(outState)
     }
 
-    private fun pages() = listOf(controlPage, settingsPage, diagnosticsPage)
+    private fun pages(): List<View> = listOf(controlPage, settingsPage, diagnosticsPage)
 
     private fun showPage(index: Int) {
         pageFinish?.let(handler::removeCallbacks)
@@ -824,7 +845,13 @@ class MainActivity : AppCompatActivity() {
             "Основний канал: телефон → магнітола → лампи"
         }
         if (hub) {
-            setHubStatus(UiLinkState.CONNECTED, "Магнітола • HUB активний")
+            val phoneState = prefs.hubRuntimeState
+            val phoneText = when (phoneState) {
+                BlePrefs.RuntimeLinkState.CONNECTED -> "Телефон • підключено"
+                BlePrefs.RuntimeLinkState.CONNECTING -> "Телефон • підключення…"
+                BlePrefs.RuntimeLinkState.OFFLINE -> "Телефон • немає з'єднання"
+            }
+            setHubStatus(phoneState, phoneText)
         } else if (RemoteLinkService.connected || prefs.hubRuntimeState == BlePrefs.RuntimeLinkState.CONNECTED) {
             setHubStatus(UiLinkState.CONNECTED, "Магнітола • підключено")
         } else if (hubUiState == UiLinkState.CONNECTING || prefs.hubRuntimeState == BlePrefs.RuntimeLinkState.CONNECTING) {
@@ -881,6 +908,7 @@ class MainActivity : AppCompatActivity() {
         tvTemp.text = "Колір  •  ${colorLabel(prefs.white)}   Білий ${prefs.white}% / Жовтий ${100 - prefs.white}%"
         tvBrightness.text = "Яскравість  •  ${prefs.brightness}%"
         tvStrobeMode.text = "${strobeModeLabel(prefs.strobeMode)} • ${colorLabel(prefs.strobeWhite)} • ${prefs.strobeBrightness}%"
+        updatePresetSelection()
     }
 
     private fun updateSettingsLabels() {
@@ -910,7 +938,32 @@ class MainActivity : AppCompatActivity() {
     private fun updateStrobeButton() {
         btnStrobeToggle.text = if (strobeOnUi) "СТОП" else "СТРОБ"
         btnStrobeToggle.isSelected = strobeOnUi
+        strobeBlink?.cancel()
+        strobeBlink = null
+        btnStrobeToggle.alpha = 1f
+        if (strobeOnUi) {
+            strobeBlink = AlphaAnimation(0.35f, 1f).apply {
+                duration = 420L
+                repeatMode = Animation.REVERSE
+                repeatCount = Animation.INFINITE
+            }
+            btnStrobeToggle.startAnimation(strobeBlink)
+        }
         updateLabels()
+    }
+
+    private fun updatePresetSelection() {
+        val selected = when {
+            prefs.white <= 15 -> btnYellow
+            prefs.white >= 85 -> btnWhite
+            else -> btnWarm
+        }
+        btnYellow.isSelected = selected === btnYellow
+        btnWarm.isSelected = selected === btnWarm
+        btnWhite.isSelected = selected === btnWhite
+        btnYellow.setTextColor(ContextCompat.getColor(this, if (selected === btnYellow) R.color.button_accent_text else R.color.preset_yellow_text))
+        btnWarm.setTextColor(ContextCompat.getColor(this, if (selected === btnWarm) R.color.button_accent_text else R.color.preset_warm_text))
+        btnWhite.setTextColor(ContextCompat.getColor(this, if (selected === btnWhite) R.color.button_accent_text else R.color.preset_white_text))
     }
 
     private fun refreshFromPrefsDelayed() {
@@ -975,9 +1028,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun retryHubConnection() {
-        if (prefs.role() == BlePrefs.Role.HUB ||
-            RemoteLinkService.connected ||
-            prefs.hubRuntimeState == BlePrefs.RuntimeLinkState.CONNECTED) return
+        if (prefs.role() == BlePrefs.Role.HUB) {
+            ControlDispatcher.connect(this)
+            return
+        }
+        if (RemoteLinkService.connected || prefs.hubRuntimeState == BlePrefs.RuntimeLinkState.CONNECTED) return
         setHubStatus(UiLinkState.CONNECTING, "Магнітола • підключення…")
         RemoteLinkService.start(this)
     }
@@ -1133,6 +1188,13 @@ class MainActivity : AppCompatActivity() {
             when (type) {
                 QStarBleService.EVENT_STROBE -> {
                     strobeOnUi = msg.startsWith("strobe_on")
+                    prefs.strobeActive = strobeOnUi
+                    updateStrobeButton()
+                }
+                QStarBleService.EVENT_PHONE_LINK -> updateRoleUi()
+                QStarBleService.EVENT_UI_STATE -> {
+                    refreshAllControlsFromPrefs()
+                    strobeOnUi = prefs.strobeActive
                     updateStrobeButton()
                 }
                 QStarBleService.EVENT_CONFIG_SYNC -> {
@@ -1199,7 +1261,17 @@ class MainActivity : AppCompatActivity() {
             "HUB: ${prefs.hubRuntimeState} • ${ConfigSyncStatus.summary(prefs.configVersion)}"
         tvLogCount.text = "Показано ${minOf(log.size, 300)} з ${log.size} записів. Копія та експорт містять до 2000 останніх записів і параметри пристрою."
         tvLog.text = log.takeLast(300).joinToString("\n")
+        if (logAutoScroll) {
+            suppressLogScrollState = true
+            diagnosticsLogScroll.post {
+                diagnosticsLogScroll.fullScroll(View.FOCUS_DOWN)
+                logAutoScroll = true
+                suppressLogScrollState = false
+            }
+        }
     }
+
+    private fun Int.dp(): Int = (this * resources.displayMetrics.density).toInt()
 
     private fun appendLog(line: String) = DiagnosticLog.write("UI", line)
 }
