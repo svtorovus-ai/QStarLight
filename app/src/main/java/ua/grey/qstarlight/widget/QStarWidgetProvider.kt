@@ -63,8 +63,24 @@ class QStarWidgetProvider : AppWidgetProvider() {
                 prefs.strobeOffMs,
                 prefs.strobePauseMs
             ) else null
-            views.setFloat(R.id.widgetLeftLink, "setAlpha", if (phase == null || phase.leftOn) 1f else 0.28f)
-            views.setFloat(R.id.widgetRightLink, "setAlpha", if (phase == null || devices.size < 2 || phase.rightOn) 1f else 0.28f)
+            views.setInt(
+                R.id.widgetLeftLink,
+                "setBackgroundResource",
+                if (phase == null || phase.leftOn) {
+                    if (light) R.drawable.widget_status_pill_light else R.drawable.widget_status_pill
+                } else {
+                    if (light) R.drawable.widget_status_pill_dim_light else R.drawable.widget_status_pill_dim
+                }
+            )
+            views.setInt(
+                R.id.widgetRightLink,
+                "setBackgroundResource",
+                if (phase == null || devices.size < 2 || phase.rightOn) {
+                    if (light) R.drawable.widget_status_pill_light else R.drawable.widget_status_pill
+                } else {
+                    if (light) R.drawable.widget_status_pill_dim_light else R.drawable.widget_status_pill_dim
+                }
+            )
             applyLink(
                 context, views, light,
                 R.id.widgetRightLink,
