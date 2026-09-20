@@ -61,6 +61,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
     private var bootPending = false
     private var welcomeStateAttempts = 0
     private var welcomeCheckScheduled = false
+    private var welcomeInProgress = false
     private var latestCct: Pair<Int, Int>? = null
     private var sendingCct = false
     private var rssiLoop = false
@@ -467,6 +468,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
             evaluateWelcomeIfReady()
             return
         }
+        if (welcomeInProgress) return
         if (safetyFallbackActive) {
             sendFrameAll(QStarProtocol.POWER_ON) {
                 sendFrameAll(QStarProtocol.cctFrame(100, 100)) {
@@ -485,6 +487,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         handler.post {
             welcomeCheckScheduled = false
             if (!bootPending && !startupPending) return@post
+            if (welcomeInProgress) return@post
             if (!allSelectedReady()) {
                 scheduleReconnect()
                 return@post
@@ -495,6 +498,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
                 bootPending = false
                 startupPending = false
                 welcomeStateAttempts = 0
+                welcomeInProgress = false
                 finishReadyCycle()
                 return@post
             }
@@ -519,8 +523,12 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
                 // The saved color/power is only the previous UI state. It must not
                 // suppress the selected welcome profile after a real lamp power-off.
                 prefs.power = false
+                welcomeInProgress = true
                 runBootRoutine()
-            } else finishReadyCycle()
+            } else {
+                welcomeInProgress = false
+                finishReadyCycle()
+            }
         }
     }
 
@@ -549,6 +557,11 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
 
     private fun activateSafetyFallback(reason: String) {
         if (remoteTakeover) return
+        if (bootPending || startupPending || welcomeInProgress) {
+            DiagnosticLog.write("BLE", "skip failsafe while welcome is pending: $reason")
+            scheduleReconnect(250)
+            return
+        }
         stopStrobeInternal(restore = false)
         safetyFallbackActive = true
         latestCct = null
@@ -719,6 +732,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
     }
 
     private fun finishBootRoutine() {
+        welcomeInProgress = false
         if (prefs.role() == BlePrefs.Role.HUB) hubTransport?.publishStatus("QStar готові") else shutdownSoon()
     }
 
