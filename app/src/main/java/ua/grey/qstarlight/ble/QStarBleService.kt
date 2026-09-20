@@ -62,6 +62,9 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
     private var welcomeStateAttempts = 0
     private var welcomeCheckScheduled = false
     private var welcomeInProgress = false
+    // If the lamps are already on when this service first sees both of them,
+    // keep the one-shot welcome armed until a real both-off state is observed.
+    private var welcomeWaitingForOff = false
     private var latestCct: Pair<Int, Int>? = null
     private var sendingCct = false
     private var rssiLoop = false
@@ -335,7 +338,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         val callback = scanDoneCallback
         scanDoneCallback = null
         callback?.invoke()
-        if (!interactive && !bootPending && connections.values.none { it.isReady() }) shutdownSoon()
+        if (!interactive && !bootPending && !welcomeWaitingForOff && connections.values.none { it.isReady() }) shutdownSoon()
     }
 
     private val scanCallback = object : ScanCallback() {
@@ -429,7 +432,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
             return
         }
         if (reconnectScheduled || remoteTakeover) return
-        val needed = interactive || bootPending || oneShot || latestCct != null || pendingAfterReady != null
+        val needed = interactive || bootPending || welcomeWaitingForOff || oneShot || latestCct != null || pendingAfterReady != null
         if (!needed) return
         reconnectScheduled = true
         handler.postDelayed({
@@ -463,7 +466,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
             prefs.markPhoneLinkAvailable()
             reconcilePhoneLifetime()
         }
-        val greetingPending = bootPending || startupPending
+        val greetingPending = bootPending || startupPending || welcomeWaitingForOff
         if (greetingPending) {
             evaluateWelcomeIfReady()
             return
@@ -486,7 +489,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         welcomeCheckScheduled = true
         handler.post {
             welcomeCheckScheduled = false
-            if (!bootPending && !startupPending) return@post
+            if (!bootPending && !startupPending && !welcomeWaitingForOff) return@post
             if (welcomeInProgress) return@post
             if (!allSelectedReady()) {
                 scheduleReconnect()
@@ -497,6 +500,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
             if (!prefs.welcomeOnConnect || refs.size < 2) {
                 bootPending = false
                 startupPending = false
+                welcomeWaitingForOff = false
                 welcomeStateAttempts = 0
                 welcomeInProgress = false
                 finishReadyCycle()
@@ -526,6 +530,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
             val bothLampsWereOff = states.size == refs.size && states.all { it == false }
             bootPending = false
             startupPending = false
+            welcomeWaitingForOff = !bothLampsWereOff
             welcomeStateAttempts = 0
             safetyFallbackActive = false
             DiagnosticLog.write(
@@ -570,7 +575,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
 
     private fun activateSafetyFallback(reason: String) {
         if (remoteTakeover) return
-        if (bootPending || startupPending || welcomeInProgress) {
+        if (welcomeInProgress || ((bootPending || startupPending) && !welcomeWaitingForOff)) {
             DiagnosticLog.write("BLE", "skip failsafe while welcome is pending: $reason")
             scheduleReconnect(250)
             return
@@ -746,6 +751,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
 
     private fun finishBootRoutine() {
         welcomeInProgress = false
+        welcomeWaitingForOff = false
         if (prefs.role() == BlePrefs.Role.HUB) hubTransport?.publishStatus("QStar готові") else shutdownSoon()
     }
 
@@ -962,7 +968,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         }
         QStarWidgetProvider.refresh(this)
         if (connectingMac == mac) connectingMac = null
-        if (bootPending || startupPending) evaluateWelcomeIfReady()
+        if (bootPending || startupPending || welcomeWaitingForOff) evaluateWelcomeIfReady()
         val connection = connections[mac]
         if (safetyFallbackActive && connection != null) {
             sendSafetyTo(connection) { handler.postDelayed({ pumpConnectPlan() }, 180) }
@@ -973,7 +979,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
 
     override fun onState(mac: String, state: QStarProtocol.LampState) {
         lampPowerState[mac] = state.power
-        if (bootPending || startupPending) evaluateWelcomeIfReady()
+        if (bootPending || startupPending || welcomeWaitingForOff) evaluateWelcomeIfReady()
         event(
             EVENT_STATE,
             mac,
