@@ -44,6 +44,7 @@ class RoleAppearanceTest {
     @Test @Config(qualifiers = "+night")
     fun hubIsLightEvenWithDarkSystemAndKeepsExistingSettings() {
         prefs.roleOverride = "hub"
+        prefs.hubRuntimeState = RuntimeLinkState.CONNECTED
         assertActivityAppearance(Configuration.UI_MODE_NIGHT_NO)
     }
 
@@ -85,7 +86,7 @@ class RoleAppearanceTest {
         assertTrue(if (light) Color.luminance(title) < 0.1f else Color.luminance(title) > 0.8f)
         assertEquals("+\nЛІВА", root.findViewById<TextView>(R.id.widgetLeftLink).text.toString())
         assertEquals("−\nПРАВА", root.findViewById<TextView>(R.id.widgetRightLink).text.toString())
-        assertEquals(if (light) "+\nТЕЛЕФОН" else "…\nМАФОН", root.findViewById<TextView>(R.id.widgetHubLink).text.toString())
+        assertEquals(if (light) "…\nТЕЛЕФОН" else "…\nМАФОН", root.findViewById<TextView>(R.id.widgetHubLink).text.toString())
         prefs.setLampRuntimeState(BlePrefs.LEFT_DEFAULT_MAC, RuntimeLinkState.CONNECTING)
         prefs.setLampRuntimeState(BlePrefs.RIGHT_DEFAULT_MAC, RuntimeLinkState.CONNECTED)
         QStarWidgetProvider.refresh(context)
