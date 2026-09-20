@@ -28,6 +28,8 @@ import java.util.concurrent.TimeUnit
 import ua.grey.qstarlight.diagnostics.DiagnosticLog
 import ua.grey.qstarlight.sync.ConfigVersion
 import ua.grey.qstarlight.sync.ConfigSyncStatus
+import ua.grey.qstarlight.widget.QStarWidgetProvider
+import ua.grey.qstarlight.widget.QStarWidgetProvider
 import kotlin.concurrent.thread
 
 class HubTransport(
