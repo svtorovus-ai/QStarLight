@@ -504,9 +504,22 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
             }
 
             val states = refs.map { lampPowerState[it.mac] }
-            if (states.any { it == null } && welcomeStateAttempts < 20) {
+            if (states.any { it == null }) {
                 welcomeStateAttempts += 1
-                handler.postDelayed({ evaluateWelcomeIfReady() }, 150L)
+                refs.filter { lampPowerState[it.mac] == null }.forEach { ref ->
+                    connections[ref.mac]?.requestState { ok ->
+                        if (!ok) {
+                            DiagnosticLog.write("WELCOME", "QUERY_STATE retry failed mac=${ref.mac}")
+                        }
+                    }
+                }
+                if (welcomeStateAttempts == 1 || welcomeStateAttempts % 10 == 0) {
+                    DiagnosticLog.write(
+                        "WELCOME",
+                        "waiting_for_power_state attempts=$welcomeStateAttempts states=${states.joinToString(",")}"
+                    )
+                }
+                handler.postDelayed({ evaluateWelcomeIfReady() }, 350L)
                 return@post
             }
 
@@ -949,6 +962,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         }
         QStarWidgetProvider.refresh(this)
         if (connectingMac == mac) connectingMac = null
+        if (bootPending || startupPending) evaluateWelcomeIfReady()
         val connection = connections[mac]
         if (safetyFallbackActive && connection != null) {
             sendSafetyTo(connection) { handler.postDelayed({ pumpConnectPlan() }, 180) }

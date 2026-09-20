@@ -104,6 +104,14 @@ class LampConnection(
         enqueue(Op.CharWrite(data.copyOf(), done))
     }
 
+    fun requestState(done: (Boolean) -> Unit = {}) {
+        if (!isReady()) {
+            done(false)
+            return
+        }
+        enqueue(Op.CharWrite(QStarProtocol.QUERY_STATE, done))
+    }
+
     fun readRssi() {
         if (gatt != null && phase == Phase.READY) gatt?.readRemoteRssi()
     }
