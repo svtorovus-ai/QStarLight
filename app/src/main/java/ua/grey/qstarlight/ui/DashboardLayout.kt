@@ -1,6 +1,7 @@
 package ua.grey.qstarlight.ui
 
 import android.content.Context
+import android.content.res.Configuration
 import android.util.AttributeSet
 import android.view.View
 import android.view.ViewGroup
@@ -21,8 +22,11 @@ class DashboardLayout(context: Context, attrs: AttributeSet?) : LinearLayout(con
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val available = MeasureSpec.getSize(widthMeasureSpec) - paddingLeft - paddingRight
-        val useColumns = resources.getBoolean(R.bool.light_system_bars) &&
-            available >= 700 * resources.displayMetrics.density
+        // The HUB activity is the non-night role and is locked to landscape.  Do not
+        // use system-bar colors as a proxy: the HUB palette is intentionally dark.
+        val hubTheme = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
+            Configuration.UI_MODE_NIGHT_NO
+        val useColumns = hubTheme && available >= 700 * resources.displayMetrics.density
         if (cards.isNotEmpty() && useColumns != wide) arrange(useColumns)
         super.onMeasure(widthMeasureSpec, heightMeasureSpec)
     }

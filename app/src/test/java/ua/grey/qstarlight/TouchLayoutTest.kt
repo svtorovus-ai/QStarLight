@@ -65,9 +65,9 @@ class TouchLayoutTest {
             if (!hub) assertTrue("Phone control $id inherited head-unit sizing", view.height <= 48)
         }
         for (id in listOf(R.id.seekTemp, R.id.seekBrightness)) {
-            assertEquals(if (hub) 64 else 42, activity.findViewById<View>(id).height)
+            assertEquals(if (hub) 64 else 38, activity.findViewById<View>(id).height)
         }
-        assertEquals(if (hub) 20f else 14f, activity.findViewById<TextView>(R.id.btnYellow).textSize, 0.1f)
+        assertEquals(if (hub) 20f else 13f, activity.findViewById<TextView>(R.id.btnYellow).textSize, 0.1f)
         listOf(R.id.tvLamp1, R.id.tvLamp2, R.id.tvLinkStatus).forEach { id ->
             val view = activity.findViewById<TextView>(id)
             val spans = (view.text as Spanned).getSpans(0, 1, RelativeSizeSpan::class.java)
@@ -120,7 +120,7 @@ class TouchLayoutTest {
         val root = manager.getViewFor(id)
         measure(root, 360, 360)
         listOf(R.id.widgetYellow, R.id.widgetWarm, R.id.widgetWhite, R.id.widgetStrobe).forEach {
-            assertEquals(64, root.findViewById<View>(it).height)
+            assertEquals(72, root.findViewById<View>(it).height)
         }
         listOf(R.id.widgetLeftLink, R.id.widgetHubLink, R.id.widgetRightLink).forEach {
             val view = root.findViewById<TextView>(it)
@@ -129,8 +129,8 @@ class TouchLayoutTest {
         }
         val first = root.findViewById<View>(R.id.b10)
         val last = root.findViewById<View>(R.id.b100)
-        assertNotSame(first.parent, last.parent)
-        assertEquals(56, last.height)
+        assertSame(first.parent, last.parent)
+        assertEquals(68, last.height)
         val position = IntArray(2).also(last::getLocationOnScreen)
         assertTrue(position[1] + last.height <= root.height)
         assertButtonTextFits(root)
@@ -140,15 +140,15 @@ class TouchLayoutTest {
         QStarWidgetProvider.refresh(context)
         val hubRoot = manager.getViewFor(id)
         measure(hubRoot, 360, 360)
-        assertEquals(64, hubRoot.findViewById<View>(R.id.widgetYellow).height)
-        assertNotSame(hubRoot.findViewById<View>(R.id.b10).parent, hubRoot.findViewById<View>(R.id.b100).parent)
+        assertEquals(72, hubRoot.findViewById<View>(R.id.widgetYellow).height)
+        assertSame(hubRoot.findViewById<View>(R.id.b10).parent, hubRoot.findViewById<View>(R.id.b100).parent)
 
         prefs.roleOverride = "phone"
         QStarWidgetProvider.refresh(context)
         val phoneRoot = manager.getViewFor(id)
         measure(phoneRoot, 360, 360)
-        assertEquals(64, phoneRoot.findViewById<View>(R.id.widgetYellow).height)
-        assertNotSame(phoneRoot.findViewById<View>(R.id.b10).parent, phoneRoot.findViewById<View>(R.id.b100).parent)
+        assertEquals(72, phoneRoot.findViewById<View>(R.id.widgetYellow).height)
+        assertSame(phoneRoot.findViewById<View>(R.id.b10).parent, phoneRoot.findViewById<View>(R.id.b100).parent)
     }
 
     private fun assertButtonTextFits(view: View) {

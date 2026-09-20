@@ -908,6 +908,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
     }
 
     override fun onReady(mac: String) {
+        prefs.markLampConnected(mac)
         event(EVENT_READY, mac, connections[mac]?.name, "ready")
         readyMacs.add(mac)
         if (prefs.role() == BlePrefs.Role.PHONE) {

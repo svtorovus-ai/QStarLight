@@ -15,6 +15,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.content.pm.ActivityInfo
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -209,14 +210,15 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         prefs = BlePrefs(this).also { it.ensureDefaults() }
+        applyRoleOrientation()
         applyRoleTheme()
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         setContentView(R.layout.activity_main)
         applySystemBarInsets()
         WindowCompat.getInsetsController(window, window.decorView).apply {
-            isAppearanceLightStatusBars = prefs.role() == BlePrefs.Role.HUB
-            isAppearanceLightNavigationBars = prefs.role() == BlePrefs.Role.HUB
+            isAppearanceLightStatusBars = false
+            isAppearanceLightNavigationBars = false
         }
         bindViews()
         configureUi()
@@ -307,6 +309,20 @@ class MainActivity : AppCompatActivity() {
                 val child = scroll.getChildAt(0)
                 logAutoScroll = child == null || scrollY + scroll.height >= child.height - 16.dp()
             }
+        }
+        diagnosticsLogScroll.setOnTouchListener { view, event ->
+            val scroll = view as ScrollView
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    // Stop the refresh runnable from fighting the finger immediately.
+                    logAutoScroll = false
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    val child = scroll.getChildAt(0)
+                    logAutoScroll = child == null || scroll.scrollY + scroll.height >= child.height - 16.dp()
+                }
+            }
+            false
         }
     }
 
@@ -796,6 +812,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun changeRole(role: BlePrefs.Role) {
         prefs.roleOverride = if (role == BlePrefs.Role.HUB) "hub" else "phone"
+        applyRoleOrientation()
         strobeOnUi = false
         if (role == BlePrefs.Role.HUB) {
             prefs.forceDirect = false
@@ -816,6 +833,14 @@ class MainActivity : AppCompatActivity() {
             AppCompatDelegate.MODE_NIGHT_NO
         } else {
             AppCompatDelegate.MODE_NIGHT_YES
+        }
+    }
+
+    private fun applyRoleOrientation() {
+        requestedOrientation = if (prefs.role() == BlePrefs.Role.HUB) {
+            ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+        } else {
+            ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         }
     }
 
@@ -1257,10 +1282,15 @@ class MainActivity : AppCompatActivity() {
 
     private fun renderDiagnostics() {
         val log = DiagnosticLog.snapshot()
+        val deviceLines = prefs.devices().map { device ->
+            "${prefs.lampSide(device)}: ${formatConnectionTimestamp(prefs.lastLampConnectionAt(device.mac))}"
+        }.joinToString("\n")
         tvDiagnosticsInfo.text = "v${UpdateManager.versionName(this)} • ${Build.MODEL} • ${prefs.role()}\n" +
-            "HUB: ${prefs.hubRuntimeState} • ${ConfigSyncStatus.summary(prefs.configVersion)}"
+            "HUB: ${prefs.hubRuntimeState} • ${ConfigSyncStatus.summary(prefs.configVersion)}\n" +
+            "Останнє підключення до мафона: ${formatConnectionTimestamp(prefs.lastHubConnectionAt)}\n" +
+            deviceLines
         tvLogCount.text = "Показано ${minOf(log.size, 300)} з ${log.size} записів. Копія та експорт містять до 2000 останніх записів і параметри пристрою."
-        tvLog.text = log.takeLast(300).joinToString("\n")
+        tvLog.text = log.takeLast(300).joinToString("\n\n")
         if (logAutoScroll) {
             suppressLogScrollState = true
             diagnosticsLogScroll.post {
@@ -1272,6 +1302,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun Int.dp(): Int = (this * resources.displayMetrics.density).toInt()
+
+    private fun formatConnectionTimestamp(value: Long): String = if (value <= 0L) {
+        "ще не було"
+    } else {
+        SimpleDateFormat("dd.MM.yyyy HH:mm:ss", Locale.getDefault()).format(Date(value))
+    }
 
     private fun appendLog(line: String) = DiagnosticLog.write("UI", line)
 }

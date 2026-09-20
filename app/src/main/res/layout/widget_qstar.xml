@@ -6,7 +6,7 @@
     android:layout_height="wrap_content"
     android:background="@drawable/widget_bg"
     android:orientation="vertical"
-    android:padding="12dp">
+    android:padding="14dp">
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -21,7 +21,7 @@
             android:letterSpacing="0.08"
             android:text="QSTAR LIGHT"
             android:textColor="#F7F9FC"
-            android:textSize="16sp"
+            android:textSize="24sp"
             android:textStyle="bold" />
         <TextView
             android:id="@+id/widgetStatus"
@@ -34,7 +34,7 @@
             android:paddingBottom="4dp"
             android:text="Білий • 100%"
             android:textColor="#72EAF3"
-            android:textSize="12sp"
+            android:textSize="18sp"
             android:textStyle="bold" />
     </LinearLayout>
     <LinearLayout
@@ -43,7 +43,7 @@
         android:layout_marginTop="8dp"
         android:gravity="center"
         android:orientation="horizontal"
-        android:minHeight="84dp"
+        android:minHeight="88dp"
         android:baselineAligned="false">
         <TextView
             android:id="@+id/widgetLeftLink"
@@ -53,9 +53,9 @@
             android:gravity="center"
             android:text="−\nЛІВА"
             android:textColor="#FF4F5E"
-            android:textSize="12sp"
+            android:textSize="16sp"
             android:textStyle="bold"
-            android:minHeight="84dp"
+            android:minHeight="88dp"
             android:paddingTop="4dp"
             android:paddingBottom="4dp"
             android:layout_marginStart="2dp"
@@ -69,9 +69,9 @@
             android:gravity="center"
             android:text="−\nМАФОН"
             android:textColor="#FF4F5E"
-            android:textSize="12sp"
+            android:textSize="16sp"
             android:textStyle="bold"
-            android:minHeight="84dp"
+            android:minHeight="88dp"
             android:paddingTop="4dp"
             android:paddingBottom="4dp"
             android:layout_marginStart="2dp"
@@ -85,9 +85,9 @@
             android:gravity="center"
             android:text="−\nПРАВА"
             android:textColor="#FF4F5E"
-            android:textSize="12sp"
+            android:textSize="16sp"
             android:textStyle="bold"
-            android:minHeight="84dp"
+            android:minHeight="88dp"
             android:paddingTop="4dp"
             android:paddingBottom="4dp"
             android:layout_marginStart="2dp"
@@ -99,7 +99,7 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="7dp"
         android:orientation="horizontal"
-        android:minHeight="64dp"
+        android:minHeight="72dp"
         android:baselineAligned="false">
         <Button
             android:id="@+id/widgetYellow"
@@ -109,10 +109,10 @@
             android:layout_weight="1"
             android:background="@drawable/widget_button_gold"
             android:minWidth="0dp"
-            android:minHeight="64dp"
+            android:minHeight="72dp"
             android:text="ЖОВТИЙ"
             android:textColor="#FFD76A"
-            android:textSize="12sp"
+            android:textSize="18sp"
             android:textStyle="bold"
             android:paddingStart="2dp"
             android:paddingEnd="2dp" />
@@ -125,10 +125,10 @@
             android:layout_weight="1"
             android:background="@drawable/widget_button_warm"
             android:minWidth="0dp"
-            android:minHeight="64dp"
+            android:minHeight="72dp"
             android:text="ТЕПЛИЙ"
             android:textColor="#FFE2A8"
-            android:textSize="12sp"
+            android:textSize="18sp"
             android:textStyle="bold"
             android:paddingStart="2dp"
             android:paddingEnd="2dp" />
@@ -141,24 +141,24 @@
             android:layout_weight="1"
             android:background="@drawable/widget_button_white"
             android:minWidth="0dp"
-            android:minHeight="64dp"
+            android:minHeight="72dp"
             android:text="БІЛИЙ"
             android:textColor="#F4F9FC"
-            android:textSize="12sp"
+            android:textSize="18sp"
             android:textStyle="bold"
             android:paddingStart="2dp"
             android:paddingEnd="2dp" />
         <Button
             android:id="@+id/widgetStrobe"
-            android:layout_width="56dp"
+            android:layout_width="72dp"
             android:layout_height="match_parent"
             android:layout_marginStart="2dp"
             android:background="@drawable/widget_button_dark"
             android:minWidth="0dp"
-            android:minHeight="64dp"
+            android:minHeight="72dp"
             android:text="⚡"
             android:textColor="#63E6F0"
-            android:textSize="24sp"
+            android:textSize="30sp"
             android:textStyle="bold"
             android:paddingStart="2dp"
             android:paddingEnd="2dp"
@@ -172,18 +172,14 @@
         android:letterSpacing="0.05"
         android:text="ЯСКРАВІСТЬ"
         android:textColor="#7F8B9C"
-        android:textSize="12sp"
+        android:textSize="18sp"
         android:textStyle="bold" />
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="68dp"
         android:gravity="center_vertical"
-        android:orientation="vertical">
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="56dp"
-            android:orientation="horizontal"
-            android:baselineAligned="false">
+        android:orientation="horizontal"
+        android:baselineAligned="false">
             <TextView
                 android:id="@+id/b10"
                 android:layout_width="0dp"
@@ -191,7 +187,7 @@
                 android:layout_weight="1"
                 android:gravity="center"
                 android:text="▬"
-                android:textSize="32sp"
+                android:textSize="30sp"
                 android:contentDescription="Яскравість 10%" />
             <TextView
                 android:id="@+id/b20"
@@ -200,7 +196,7 @@
                 android:layout_weight="1"
                 android:gravity="center"
                 android:text="▬"
-                android:textSize="26sp"
+                android:textSize="30sp"
                 android:contentDescription="Яскравість 20%" />
             <TextView
                 android:id="@+id/b30"
@@ -209,7 +205,7 @@
                 android:layout_weight="1"
                 android:gravity="center"
                 android:text="▬"
-                android:textSize="26sp"
+                android:textSize="30sp"
                 android:contentDescription="Яскравість 30%" />
             <TextView
                 android:id="@+id/b40"
@@ -218,7 +214,7 @@
                 android:layout_weight="1"
                 android:gravity="center"
                 android:text="▬"
-                android:textSize="26sp"
+                android:textSize="30sp"
                 android:contentDescription="Яскравість 40%" />
             <TextView
                 android:id="@+id/b50"
@@ -227,14 +223,8 @@
                 android:layout_weight="1"
                 android:gravity="center"
                 android:text="▬"
-                android:textSize="26sp"
+                android:textSize="30sp"
                 android:contentDescription="Яскравість 50%" />
-        </LinearLayout>
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="56dp"
-            android:orientation="horizontal"
-            android:baselineAligned="false">
             <TextView
                 android:id="@+id/b60"
                 android:layout_width="0dp"
@@ -242,7 +232,7 @@
                 android:layout_weight="1"
                 android:gravity="center"
                 android:text="▬"
-                android:textSize="32sp"
+                android:textSize="30sp"
                 android:contentDescription="Яскравість 60%" />
             <TextView
                 android:id="@+id/b70"
@@ -251,7 +241,7 @@
                 android:layout_weight="1"
                 android:gravity="center"
                 android:text="▬"
-                android:textSize="26sp"
+                android:textSize="30sp"
                 android:contentDescription="Яскравість 70%" />
             <TextView
                 android:id="@+id/b80"
@@ -260,7 +250,7 @@
                 android:layout_weight="1"
                 android:gravity="center"
                 android:text="▬"
-                android:textSize="26sp"
+                android:textSize="30sp"
                 android:contentDescription="Яскравість 80%" />
             <TextView
                 android:id="@+id/b90"
@@ -269,7 +259,7 @@
                 android:layout_weight="1"
                 android:gravity="center"
                 android:text="▬"
-                android:textSize="26sp"
+                android:textSize="30sp"
                 android:contentDescription="Яскравість 90%" />
             <TextView
                 android:id="@+id/b100"
@@ -278,8 +268,7 @@
                 android:layout_weight="1"
                 android:gravity="center"
                 android:text="▬"
-                android:textSize="26sp"
+                android:textSize="30sp"
                 android:contentDescription="Яскравість 100%" />
-        </LinearLayout>
     </LinearLayout>
 </LinearLayout>

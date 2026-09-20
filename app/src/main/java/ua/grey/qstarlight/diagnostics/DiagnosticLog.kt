@@ -45,7 +45,7 @@ object DiagnosticLog {
 
     fun write(source: String, message: String, level: String = "INFO") {
         val stamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS XXX", Locale.US).format(Date())
-        val line = "$stamp [$level] [$source] ${DiagnosticText.sanitize(message)}"
+        val line = "$stamp [$level] [$source] [${Thread.currentThread().name}] ${DiagnosticText.sanitize(message)}"
         synchronized(lock) {
             addLine(line)
             // Submit under the same lock so disk order matches the visible journal.
@@ -76,11 +76,24 @@ object DiagnosticLog {
             appendLine("App: ${UpdateManager.versionName(context)} (${UpdateManager.versionCode(context)})")
             appendLine("Device: ${Build.MANUFACTURER} ${Build.MODEL}; Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
             appendLine("Role: ${prefs.role()}; direct BLE: ${prefs.forceDirect}; HUB: ${prefs.hubRuntimeState}")
+            appendLine("Last HUB connection: ${formatTimestamp(prefs.lastHubConnectionAt)}")
+            prefs.devices().forEach { device ->
+                appendLine("Last ${prefs.lampSide(device)} connection (${device.mac}): ${formatTimestamp(prefs.lastLampConnectionAt(device.mac))}")
+            }
             appendLine("Timezone: ${TimeZone.getDefault().id}")
             appendLine("Sync: ${ConfigSyncStatus.summary(prefs.configVersion)}")
             appendLine("Config: ${DiagnosticText.sanitize(prefs.syncConfigJson().toString())}")
             appendLine("Recent journal (up to $MAX_LINES entries; PIN/passwords omitted):")
-            snapshot().forEach { appendLine(it) }
+            snapshot().forEach {
+                appendLine(it)
+                appendLine()
+            }
         }
+    }
+
+    private fun formatTimestamp(value: Long): String = if (value <= 0L) {
+        "ще не було"
+    } else {
+        SimpleDateFormat("dd.MM.yyyy HH:mm:ss", Locale.getDefault()).format(Date(value))
     }
 }

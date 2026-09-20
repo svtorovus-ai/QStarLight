@@ -376,6 +376,7 @@ class RemoteLinkService : Service() {
                             else -> prefs.lampRuntimeState(mac)
                         }
                         prefs.setLampRuntimeState(mac, state)
+                        if (state == BlePrefs.RuntimeLinkState.CONNECTED) prefs.markLampConnected(mac)
                         QStarWidgetProvider.refresh(this)
                     }
                     broadcast(EVENT_HUB_BLE, json.optString("message", "BLE"), host, line)
@@ -680,6 +681,7 @@ class RemoteLinkService : Service() {
         prefs.hubRuntimeState =
             if (value) BlePrefs.RuntimeLinkState.CONNECTED else BlePrefs.RuntimeLinkState.OFFLINE
         if (value) {
+            prefs.markHubConnected()
             prefs.markPhoneLinkAvailable()
         } else if (!probeOnly) {
             // Once HUB transport is gone, its last lamp state is no longer authoritative.

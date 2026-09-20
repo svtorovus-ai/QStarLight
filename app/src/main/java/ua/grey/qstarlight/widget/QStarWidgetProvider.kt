@@ -100,7 +100,7 @@ class QStarWidgetProvider : AppWidgetProvider() {
         label: String,
         state: BlePrefs.RuntimeLinkState
     ) {
-        val labelSize = 16f
+        val labelSize = 19f
         views.setTextViewTextSize(viewId, TypedValue.COMPLEX_UNIT_SP, labelSize)
         views.setTextViewText(viewId, LinkIndicator.label(state, label, 50f / labelSize, stacked = true))
         views.setTextColor(viewId, LinkIndicator.color(context, state, light))
@@ -139,13 +139,27 @@ class QStarWidgetProvider : AppWidgetProvider() {
             R.id.widgetStrobe to if (light) R.color.widget_light_accent else R.color.widget_dark_accent
         )
         colors.forEach { (id, color) -> views.setTextColor(id, ContextCompat.getColor(context, color)) }
-        views.setTextViewTextSize(R.id.widgetTitle, TypedValue.COMPLEX_UNIT_SP, 20f)
-        views.setTextViewTextSize(R.id.widgetStatus, TypedValue.COMPLEX_UNIT_SP, 16f)
-        views.setTextViewTextSize(R.id.widgetBrightnessLabel, TypedValue.COMPLEX_UNIT_SP, 16f)
+        views.setTextViewTextSize(R.id.widgetTitle, TypedValue.COMPLEX_UNIT_SP, 24f)
+        views.setTextViewTextSize(R.id.widgetStatus, TypedValue.COMPLEX_UNIT_SP, 18f)
+        views.setTextViewTextSize(R.id.widgetBrightnessLabel, TypedValue.COMPLEX_UNIT_SP, 18f)
         listOf(R.id.widgetYellow, R.id.widgetWarm, R.id.widgetWhite).forEach {
-            views.setTextViewTextSize(it, TypedValue.COMPLEX_UNIT_SP, 16f)
+            views.setTextViewTextSize(it, TypedValue.COMPLEX_UNIT_SP, 18f)
         }
         val activeWhite = BlePrefs(context).white
+        val active = if (light) R.color.widget_light_active_text else R.color.widget_dark_active_text
+        val inactive = intArrayOf(
+            if (light) R.color.widget_light_yellow else R.color.widget_dark_yellow,
+            if (light) R.color.widget_light_warm else R.color.widget_dark_warm,
+            if (light) R.color.widget_light_text else R.color.widget_dark_text
+        )
+        val activeIndex = when {
+            activeWhite <= 15 -> 0
+            activeWhite >= 85 -> 2
+            else -> 1
+        }
+        listOf(R.id.widgetYellow, R.id.widgetWarm, R.id.widgetWhite).forEachIndexed { index, id ->
+            views.setTextColor(id, ContextCompat.getColor(context, if (index == activeIndex) active else inactive[index]))
+        }
         views.setInt(R.id.widgetYellow, "setBackgroundResource", if (activeWhite <= 15) {
             if (light) R.drawable.widget_button_gold_active_light else R.drawable.widget_button_gold_active
         } else if (light) R.drawable.widget_button_gold_light else R.drawable.widget_button_gold)

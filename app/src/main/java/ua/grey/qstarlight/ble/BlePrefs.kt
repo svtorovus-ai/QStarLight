@@ -175,6 +175,22 @@ class BlePrefs(private val context: Context) {
         get() = prefs.getString(KEY_LAST_HOST, "") ?: ""
         set(value) { prefs.edit().putString(KEY_LAST_HOST, value.trim()).apply() }
 
+    /** Last successful phone ↔ HUB session, kept after disconnect for diagnostics. */
+    var lastHubConnectionAt: Long
+        get() = prefs.getLong(KEY_LAST_HUB_CONNECTION_AT, 0L)
+        set(value) { prefs.edit().putLong(KEY_LAST_HUB_CONNECTION_AT, value).apply() }
+
+    fun lastLampConnectionAt(mac: String): Long =
+        prefs.getLong(KEY_LAST_LAMP_CONNECTION_PREFIX + mac.uppercase(), 0L)
+
+    fun markHubConnected() {
+        lastHubConnectionAt = System.currentTimeMillis()
+    }
+
+    fun markLampConnected(mac: String) {
+        prefs.edit().putLong(KEY_LAST_LAMP_CONNECTION_PREFIX + mac.uppercase(), System.currentTimeMillis()).apply()
+    }
+
     var directFallback: Boolean
         get() = prefs.getBoolean(KEY_DIRECT_FALLBACK, false)
         set(value) { prefs.edit().putBoolean(KEY_DIRECT_FALLBACK, value).apply() }
@@ -441,6 +457,8 @@ class BlePrefs(private val context: Context) {
         private const val KEY_REMOTE_PIN = "remote_pin"
         private const val KEY_MANUAL_HOST = "manual_hub_host"
         private const val KEY_LAST_HOST = "last_hub_host"
+        private const val KEY_LAST_HUB_CONNECTION_AT = "last_hub_connection_at"
+        private const val KEY_LAST_LAMP_CONNECTION_PREFIX = "last_lamp_connection_"
         private const val KEY_DIRECT_FALLBACK = "direct_fallback"
         private const val KEY_FORCE_DIRECT = "force_direct"
         private const val KEY_REMOTE_KEEPALIVE = "remote_keepalive"

@@ -21,4 +21,6 @@
     <color name="widget_dark_brightness">#FFD14A</color>
     <color name="widget_light_track">#637F92</color>
     <color name="widget_dark_track">#1A2631</color>
+    <color name="widget_light_active_text">#E8FCFF</color>
+    <color name="widget_dark_active_text">#E8FCFF</color>
 </resources>

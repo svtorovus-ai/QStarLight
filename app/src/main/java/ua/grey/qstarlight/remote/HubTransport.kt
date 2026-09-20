@@ -307,6 +307,8 @@ class HubTransport(
 
     private fun setPhoneLinkState(state: BlePrefs.RuntimeLinkState) {
         prefs.hubRuntimeState = state
+        if (state == BlePrefs.RuntimeLinkState.CONNECTED) prefs.markHubConnected()
+        DiagnosticLog.write("HUB", "phone_link=${state.name} clients=${clients.size}")
         QStarWidgetProvider.refresh(context)
         context.sendBroadcast(
             android.content.Intent(QStarBleService.ACTION_EVENT)
