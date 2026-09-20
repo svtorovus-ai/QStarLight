@@ -1187,7 +1187,6 @@
                         android:layout_height="wrap_content"
                         android:minHeight="120dp"
                         android:textColor="@color/log_text"
-                        android:textIsSelectable="true"
                         android:textSize="@dimen/text_log"
                         android:typeface="monospace" />
                 </ScrollView>

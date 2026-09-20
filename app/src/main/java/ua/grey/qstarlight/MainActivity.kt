@@ -159,8 +159,6 @@ class MainActivity : AppCompatActivity() {
     private var pendingLogExport: String? = null
     private var logAutoScroll = true
     private var logTouching = false
-    private var logTouchGeneration = 0L
-    private var suppressLogScrollState = false
     private var strobeBlink: AlphaAnimation? = null
     private val strobeStatusTicker = object : Runnable {
         override fun run() {
@@ -316,7 +314,7 @@ class MainActivity : AppCompatActivity() {
         btnPushUpdate = findViewById(R.id.btnPushUpdate)
         btnInstallPermission = findViewById(R.id.btnInstallPermission)
         diagnosticsLogScroll.setOnScrollChangeListener { view, _, scrollY, _, _ ->
-            if (!suppressLogScrollState && !logTouching) {
+            if (!logTouching) {
                 val scroll = view as ScrollView
                 val child = scroll.getChildAt(0)
                 logAutoScroll = child == null || scrollY + scroll.height >= child.height - 16.dp()
@@ -326,8 +324,7 @@ class MainActivity : AppCompatActivity() {
             val scroll = view as ScrollView
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
-                    // Stop the refresh runnable from fighting the finger immediately.
-                    logTouchGeneration++
+                    // Freeze both the position and the rendered content while the user interacts.
                     logTouching = true
                     logAutoScroll = false
                 }
@@ -1325,8 +1322,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun renderDiagnostics() {
+        // Never mutate the log TextView while the user is away from the tail.
+        // Replacing its text changes the measured child height and steals the user's position.
+        if (logTouching || !logAutoScroll) return
+
         val log = DiagnosticLog.snapshot()
-        if (logTouching) return
         val deviceLines = prefs.devices().map { device ->
             "${prefs.lampSide(device)}: ${formatConnectionTimestamp(prefs.lastLampConnectionAt(device.mac))}"
         }.joinToString("\n")
@@ -1336,33 +1336,11 @@ class MainActivity : AppCompatActivity() {
             deviceLines
         tvLogCount.text = "Показано ${minOf(log.size, 300)} з ${log.size} записів. Копія та експорт містять до 2000 останніх записів і параметри пристрою."
         val renderedLog = log.takeLast(300).joinToString("\n\n")
-        val oldScrollY = diagnosticsLogScroll.scrollY
-        val followTail = logAutoScroll && !logTouching
         val textChanged = tvLog.text.toString() != renderedLog
         if (textChanged) tvLog.text = renderedLog
-        if (followTail) {
-            suppressLogScrollState = true
-            val generation = logTouchGeneration
+        if (textChanged) {
             diagnosticsLogScroll.post {
-                if (generation != logTouchGeneration) {
-                    suppressLogScrollState = false
-                    return@post
-                }
                 if (!logTouching && logAutoScroll) diagnosticsLogScroll.fullScroll(View.FOCUS_DOWN)
-                suppressLogScrollState = false
-            }
-        } else if (textChanged) {
-            suppressLogScrollState = true
-            val generation = logTouchGeneration
-            diagnosticsLogScroll.post {
-                if (generation != logTouchGeneration) {
-                    suppressLogScrollState = false
-                    return@post
-                }
-                val child = diagnosticsLogScroll.getChildAt(0)
-                val maxY = ((child?.height ?: 0) - diagnosticsLogScroll.height).coerceAtLeast(0)
-                diagnosticsLogScroll.scrollTo(0, oldScrollY.coerceIn(0, maxY))
-                suppressLogScrollState = false
             }
         }
     }
