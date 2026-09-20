@@ -182,7 +182,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
                     intent.getBooleanExtra(EXTRA_STROBE_ENABLED, false)
                 } else !strobeActive
                 prefs.strobeActive = requested
-                startForegroundSafe(if (requested) "Стробоскоп" else "QStar")
+                startForegroundSafe(if (requested) "Мигалки" else "QStar")
                 if (requested) startStrobe() else stopStrobeInternal(restore = true)
             }
             ACTION_CONFIG_CHANGED -> {
@@ -650,12 +650,6 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         if (prefs.role() == BlePrefs.Role.HUB) hubTransport?.publishStatus("QStar готові") else shutdownSoon()
     }
 
-    private data class StrobeStep(
-        val states: List<Boolean>,
-        val delayMs: Int,
-        val whites: List<Int?>? = null
-    )
-
     private fun startStrobe() {
         oneShot = false
         interactive = true
@@ -699,69 +693,15 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         }
     }
 
-    private fun strobeSequence(): List<StrobeStep> {
-        val count = prefs.devices().size.coerceAtLeast(1)
-        val allOn = List(count) { true }
-        val allOff = List(count) { false }
-        val on = prefs.strobeOnMs
-        val off = prefs.strobeOffMs
-        val pause = prefs.strobePauseMs
-        return when (prefs.strobeMode) {
-            BlePrefs.StrobeMode.CLASSIC -> listOf(
-                StrobeStep(allOn, on), StrobeStep(allOff, off)
-            )
-            BlePrefs.StrobeMode.DOUBLE -> listOf(
-                StrobeStep(allOn, on), StrobeStep(allOff, off),
-                StrobeStep(allOn, on), StrobeStep(allOff, pause)
-            )
-            BlePrefs.StrobeMode.TRIPLE -> listOf(
-                StrobeStep(allOn, on), StrobeStep(allOff, off),
-                StrobeStep(allOn, on), StrobeStep(allOff, off),
-                StrobeStep(allOn, on), StrobeStep(allOff, pause)
-            )
-            BlePrefs.StrobeMode.ALTERNATE -> {
-                if (count < 2) listOf(StrobeStep(allOn, on), StrobeStep(allOff, off))
-                else listOf(
-                    StrobeStep(listOf(true, false), on), StrobeStep(allOff, off),
-                    StrobeStep(listOf(false, true), on), StrobeStep(allOff, pause)
-                )
-            }
-            BlePrefs.StrobeMode.DOUBLE_ALTERNATE -> {
-                if (count < 2) listOf(
-                    StrobeStep(allOn, on), StrobeStep(allOff, off),
-                    StrobeStep(allOn, on), StrobeStep(allOff, pause)
-                ) else listOf(
-                    StrobeStep(listOf(true, false), on), StrobeStep(allOff, off),
-                    StrobeStep(listOf(true, false), on), StrobeStep(allOff, pause / 2),
-                    StrobeStep(listOf(false, true), on), StrobeStep(allOff, off),
-                    StrobeStep(listOf(false, true), on), StrobeStep(allOff, pause)
-                )
-            }
-            BlePrefs.StrobeMode.YELLOW_WHITE_SWAP -> {
-                if (count < 2) {
-                    listOf(StrobeStep(allOn, on), StrobeStep(allOff, off))
-                } else {
-                    // Requested pattern:
-                    // L yellow -> dark -> R white -> dark -> L white -> dark -> R yellow -> dark.
-                    // It intentionally ignores the long series pause and caps timings for a rapid effect.
-                    val fastOn = on.coerceIn(40, 80)
-                    val fastOff = off.coerceIn(40, 60)
-                    listOf(
-                        StrobeStep(listOf(true, false), fastOn, listOf(0, null)),
-                        StrobeStep(allOff, fastOff),
-                        StrobeStep(listOf(false, true), fastOn, listOf(null, 100)),
-                        StrobeStep(allOff, fastOff),
-                        StrobeStep(listOf(true, false), fastOn, listOf(100, null)),
-                        StrobeStep(allOff, fastOff),
-                        StrobeStep(listOf(false, true), fastOn, listOf(null, 0)),
-                        StrobeStep(allOff, fastOff)
-                    )
-                }
-            }
-        }
-    }
+    private fun strobeSequence(): List<StrobeTimeline.Step> = StrobeTimeline.sequence(
+        prefs.strobeMode,
+        prefs.devices().size,
+        prefs.strobeOnMs,
+        prefs.strobeOffMs,
+        prefs.strobePauseMs
+    )
 
-    private fun applyStrobeStep(step: StrobeStep, done: () -> Unit) {
+    private fun applyStrobeStep(step: StrobeTimeline.Step, done: () -> Unit) {
         val refs = prefs.devices()
         fun sendAt(index: Int) {
             if (index >= refs.size) { done(); return }

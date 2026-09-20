@@ -49,6 +49,7 @@ import org.json.JSONObject
 import ua.grey.qstarlight.ble.BlePrefs
 import ua.grey.qstarlight.ble.BlePrefs.RuntimeLinkState as UiLinkState
 import ua.grey.qstarlight.ble.QStarBleService
+import ua.grey.qstarlight.ble.StrobeTimeline
 import ua.grey.qstarlight.control.ControlDispatcher
 import ua.grey.qstarlight.remote.RemoteLinkService
 import ua.grey.qstarlight.update.UpdateManager
@@ -156,8 +157,16 @@ class MainActivity : AppCompatActivity() {
     private val logRefreshScheduled = AtomicBoolean(false)
     private var pendingLogExport: String? = null
     private var logAutoScroll = true
+    private var logTouching = false
     private var suppressLogScrollState = false
     private var strobeBlink: AlphaAnimation? = null
+    private val strobeStatusTicker = object : Runnable {
+        override fun run() {
+            if (!strobeOnUi) return
+            updateStrobeIndicators()
+            handler.postDelayed(this, 40L)
+        }
+    }
     private val logRefresh = Runnable {
         logRefreshScheduled.set(false)
         updateSyncStatus()
@@ -315,9 +324,11 @@ class MainActivity : AppCompatActivity() {
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     // Stop the refresh runnable from fighting the finger immediately.
+                    logTouching = true
                     logAutoScroll = false
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    logTouching = false
                     val child = scroll.getChildAt(0)
                     logAutoScroll = child == null || scroll.scrollY + scroll.height >= child.height - 16.dp()
                 }
@@ -638,6 +649,7 @@ class MainActivity : AppCompatActivity() {
         activityStarted = true
         DiagnosticLog.addListener(logListener)
         handler.post(logRefresh)
+        if (strobeOnUi) updateStrobeButton()
         ContextCompat.registerReceiver(
             this, receiver, IntentFilter(QStarBleService.ACTION_EVENT), ContextCompat.RECEIVER_NOT_EXPORTED
         )
@@ -655,6 +667,7 @@ class MainActivity : AppCompatActivity() {
         activityStarted = false
         DiagnosticLog.removeListener(logListener)
         handler.removeCallbacks(logRefresh)
+        handler.removeCallbacks(strobeStatusTicker)
         logRefreshScheduled.set(false)
         // Flush the final value even when the user leaves before the UI throttle fires.
         pendingConfigSync?.let { handler.removeCallbacks(it); pendingConfigSync = null; it.run() }
@@ -942,8 +955,8 @@ class MainActivity : AppCompatActivity() {
         tvStartBrightness.text = "Стартова яскравість • ${prefs.startBrightness}%"
         tvFadeDuration.text = "Тривалість переходу • ${formatDuration(prefs.fadeDurationMs)}"
         tvFadeSteps.text = "Плавність • ${prefs.fadeSteps} кроків"
-        tvStrobeWhite.text = "Колір строба • ${colorLabel(prefs.strobeWhite)} • Білий ${prefs.strobeWhite}%"
-        tvStrobeBrightness.text = "Яскравість строба • ${prefs.strobeBrightness}%"
+        tvStrobeWhite.text = "Колір мигалок • ${colorLabel(prefs.strobeWhite)} • Білий ${prefs.strobeWhite}%"
+        tvStrobeBrightness.text = "Яскравість мигалок • ${prefs.strobeBrightness}%"
         tvStrobeOn.text = "Імпульс ON • ${prefs.strobeOnMs} мс"
         tvStrobeOff.text = "Пауза між імпульсами • ${prefs.strobeOffMs} мс"
         tvStrobePause.text = "Пауза між серіями • ${prefs.strobePauseMs} мс"
@@ -961,20 +974,39 @@ class MainActivity : AppCompatActivity() {
     private fun formatDuration(ms: Int): String = if (ms < 1000) "$ms мс" else String.format(java.util.Locale.US, "%.1f с", ms / 1000.0)
 
     private fun updateStrobeButton() {
-        btnStrobeToggle.text = if (strobeOnUi) "СТОП" else "СТРОБ"
+        btnStrobeToggle.text = if (strobeOnUi) "СТОП" else "МИГАЛКИ"
         btnStrobeToggle.isSelected = strobeOnUi
         strobeBlink?.cancel()
         strobeBlink = null
+        handler.removeCallbacks(strobeStatusTicker)
         btnStrobeToggle.alpha = 1f
         if (strobeOnUi) {
             strobeBlink = AlphaAnimation(0.35f, 1f).apply {
-                duration = 420L
+                duration = 125L
                 repeatMode = Animation.REVERSE
                 repeatCount = Animation.INFINITE
             }
             btnStrobeToggle.startAnimation(strobeBlink)
+            handler.post(strobeStatusTicker)
         }
+        updateStrobeIndicators()
         updateLabels()
+    }
+
+    private fun updateStrobeIndicators() {
+        if (!::tvLamp1.isInitialized || !::tvLamp2.isInitialized) return
+        val phase = if (strobeOnUi) StrobeTimeline.phaseAt(
+            System.currentTimeMillis(),
+            prefs.strobeStartedAt,
+            prefs.strobeMode,
+            prefs.devices().size,
+            prefs.strobeOnMs,
+            prefs.strobeOffMs,
+            prefs.strobePauseMs
+        ) else null
+        val devices = prefs.devices()
+        tvLamp1.alpha = if (phase == null || devices.isEmpty() || phase.leftOn) 1f else 0.28f
+        tvLamp2.alpha = if (phase == null || devices.size < 2 || phase.rightOn) 1f else 0.28f
     }
 
     private fun updatePresetSelection() {
@@ -1290,12 +1322,23 @@ class MainActivity : AppCompatActivity() {
             "Останнє підключення до мафона: ${formatConnectionTimestamp(prefs.lastHubConnectionAt)}\n" +
             deviceLines
         tvLogCount.text = "Показано ${minOf(log.size, 300)} з ${log.size} записів. Копія та експорт містять до 2000 останніх записів і параметри пристрою."
-        tvLog.text = log.takeLast(300).joinToString("\n\n")
-        if (logAutoScroll) {
+        val renderedLog = log.takeLast(300).joinToString("\n\n")
+        val oldScrollY = diagnosticsLogScroll.scrollY
+        val followTail = logAutoScroll && !logTouching
+        val textChanged = tvLog.text.toString() != renderedLog
+        if (textChanged) tvLog.text = renderedLog
+        if (followTail) {
             suppressLogScrollState = true
             diagnosticsLogScroll.post {
-                diagnosticsLogScroll.fullScroll(View.FOCUS_DOWN)
-                logAutoScroll = true
+                if (!logTouching && logAutoScroll) diagnosticsLogScroll.fullScroll(View.FOCUS_DOWN)
+                suppressLogScrollState = false
+            }
+        } else if (textChanged) {
+            suppressLogScrollState = true
+            diagnosticsLogScroll.post {
+                val child = diagnosticsLogScroll.getChildAt(0)
+                val maxY = ((child?.height ?: 0) - diagnosticsLogScroll.height).coerceAtLeast(0)
+                diagnosticsLogScroll.scrollTo(0, oldScrollY.coerceIn(0, maxY))
                 suppressLogScrollState = false
             }
         }

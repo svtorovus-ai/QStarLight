@@ -116,7 +116,20 @@ class BlePrefs(private val context: Context) {
     /** Runtime-only state used by the activity and widget to show an active strobe. */
     var strobeActive: Boolean
         get() = prefs.getBoolean("strobe_active", false)
-        set(value) { prefs.edit().putBoolean("strobe_active", value).apply() }
+        set(value) {
+            val edit = prefs.edit().putBoolean("strobe_active", value)
+            if (value) {
+                if (prefs.getLong(KEY_STROBE_STARTED_AT, 0L) <= 0L) {
+                    edit.putLong(KEY_STROBE_STARTED_AT, System.currentTimeMillis())
+                }
+            } else {
+                edit.putLong(KEY_STROBE_STARTED_AT, 0L)
+            }
+            edit.apply()
+        }
+
+    val strobeStartedAt: Long
+        get() = prefs.getLong(KEY_STROBE_STARTED_AT, 0L)
 
     fun updateLight(white: Int? = null, brightness: Int? = null, power: Boolean? = null): Unit = synchronized(CONFIG_LOCK) {
         val editor = prefs.edit()
@@ -488,5 +501,6 @@ class BlePrefs(private val context: Context) {
         private const val KEY_STROBE_ON = "strobe_on_ms"
         private const val KEY_STROBE_OFF = "strobe_off_ms"
         private const val KEY_STROBE_PAUSE = "strobe_pause_ms"
+        private const val KEY_STROBE_STARTED_AT = "strobe_started_at"
     }
 }

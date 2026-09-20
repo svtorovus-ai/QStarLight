@@ -57,7 +57,7 @@ class QStarControlsProviderService : ControlsProviderService() {
             Control.StatelessBuilder(ID_WARM, pi).setTitle("Теплий").setSubtitle("QStar").setStructure("Hover").setDeviceType(DeviceTypes.TYPE_LIGHT).build(),
             Control.StatelessBuilder(ID_WHITE, pi).setTitle("Білий").setSubtitle("QStar").setStructure("Hover").setDeviceType(DeviceTypes.TYPE_LIGHT).build(),
             Control.StatelessBuilder(ID_BRIGHTNESS, pi).setTitle("Яскравість").setSubtitle("${prefs.brightness}%").setStructure("Hover").setDeviceType(DeviceTypes.TYPE_LIGHT).build(),
-            Control.StatelessBuilder(ID_STROBE, pi).setTitle("Строб").setSubtitle(strobeLabel()).setStructure("Hover").setDeviceType(DeviceTypes.TYPE_LIGHT).build()
+            Control.StatelessBuilder(ID_STROBE, pi).setTitle("Мигалки").setSubtitle(strobeLabel()).setStructure("Hover").setDeviceType(DeviceTypes.TYPE_LIGHT).build()
         )
     }
 
@@ -84,7 +84,7 @@ class QStarControlsProviderService : ControlsProviderService() {
                 .setControlTemplate(RangeTemplate("brightness_range", 5f, 100f, prefs.brightness.toFloat(), 5f, "%.0f%%"))
                 .build(),
             Control.StatefulBuilder(ID_STROBE, pi)
-                .setTitle("Строб")
+                .setTitle("Мигалки")
                 .setSubtitle(strobeLabel())
                 .setStructure("Hover")
                 .setDeviceType(DeviceTypes.TYPE_LIGHT)

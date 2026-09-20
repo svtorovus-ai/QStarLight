@@ -13,6 +13,7 @@ import androidx.core.content.ContextCompat
 import ua.grey.qstarlight.MainActivity
 import ua.grey.qstarlight.R
 import ua.grey.qstarlight.ble.BlePrefs
+import ua.grey.qstarlight.ble.StrobeTimeline
 import ua.grey.qstarlight.control.ControlActionReceiver
 import ua.grey.qstarlight.ui.LinkIndicator
 
@@ -27,7 +28,7 @@ class QStarWidgetProvider : AppWidgetProvider() {
             val layout = R.layout.widget_qstar
             val views = RemoteViews(context.packageName, layout)
             val strobeActive = prefs.strobeActive
-            val strobeBlinkOn = strobeActive && (SystemClock.elapsedRealtime() / 450L) % 2L == 0L
+            val strobeBlinkOn = strobeActive && (SystemClock.elapsedRealtime() / 125L) % 2L == 0L
             applyTheme(context, views, light, strobeActive, strobeBlinkOn)
             val colorName = when {
                 prefs.white <= 15 -> "Жовтий"
@@ -53,6 +54,17 @@ class QStarWidgetProvider : AppWidgetProvider() {
                 "ЛІВА",
                 left?.let { prefs.lampRuntimeState(it.mac) } ?: BlePrefs.RuntimeLinkState.OFFLINE
             )
+            val phase = if (strobeActive) StrobeTimeline.phaseAt(
+                System.currentTimeMillis(),
+                prefs.strobeStartedAt,
+                prefs.strobeMode,
+                devices.size,
+                prefs.strobeOnMs,
+                prefs.strobeOffMs,
+                prefs.strobePauseMs
+            ) else null
+            views.setFloat(R.id.widgetLeftLink, "setAlpha", if (phase == null || phase.leftOn) 1f else 0.28f)
+            views.setFloat(R.id.widgetRightLink, "setAlpha", if (phase == null || devices.size < 2 || phase.rightOn) 1f else 0.28f)
             applyLink(
                 context, views, light,
                 R.id.widgetRightLink,
@@ -174,7 +186,7 @@ class QStarWidgetProvider : AppWidgetProvider() {
     private fun scheduleBlink(context: Context) {
         blinkHandler.removeCallbacksAndMessages(null)
         val appContext = context.applicationContext
-        blinkHandler.postDelayed({ refresh(appContext) }, 450L)
+        blinkHandler.postDelayed({ refresh(appContext) }, 40L)
     }
 
     private fun openAppIntent(context: Context): PendingIntent =

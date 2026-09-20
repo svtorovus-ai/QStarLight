@@ -162,7 +162,7 @@
             android:textStyle="bold"
             android:paddingStart="2dp"
             android:paddingEnd="2dp"
-            android:contentDescription="Стробоскоп" />
+            android:contentDescription="Мигалки" />
     </LinearLayout>
     <TextView
         android:id="@+id/widgetBrightnessLabel"

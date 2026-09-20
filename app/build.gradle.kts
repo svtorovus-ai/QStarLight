@@ -18,8 +18,8 @@ android {
         applicationId = "ua.grey.qstarlight"
         minSdk = 26
         targetSdk = 35
-        versionCode = 27
-        versionName = "0.5.19"
+        versionCode = 28
+        versionName = "0.5.20"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     signingConfigs {
