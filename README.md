@@ -1,6 +1,6 @@
 # QStar Light
 
-Current development version: **0.5.7**.
+Current development version: **0.5.32**.
 
 Native Android app for two QStar/YOBIS PZ-05 BLE headlight controllers.
 

@@ -39,7 +39,7 @@ class HubTransport(
     private val listener: Listener
 ) {
     interface Listener {
-        fun onRemoteCommand(command: String, payload: JSONObject)
+        fun onRemoteCommand(command: String, payload: JSONObject, onComplete: (Boolean) -> Unit)
         fun onTakeoverChanged(active: Boolean)
         fun onRemoteConfig(config: JSONObject, onApplied: (Boolean) -> Unit)
         fun onUpdateStatus(text: String)
@@ -234,15 +234,10 @@ class HubTransport(
                     "ble" -> acceptRemoteBle(peer.id, json)
                     "ble_snapshot" -> acceptRemoteBleSnapshot(peer.id, json)
                     "takeover" -> {
-                        val current = takeoverOwner
-                        if (current == null || current == id) {
-                            takeoverOwner = id
-                            listener.onTakeoverChanged(true)
-                            send(peer, JSONObject().put("type", "ack").put("message", "direct_takeover_granted"))
-                            publishStatus("Телефон керує лампами напряму")
-                        } else {
-                            send(peer, JSONObject().put("type", "ack").put("message", "takeover_busy"))
-                        }
+                        takeoverOwner = null
+                        listener.onTakeoverChanged(false)
+                        send(peer, JSONObject().put("type", "ack").put("message", "hub_is_ble_owner"))
+                        publishStatus("Магнітола керує лампами")
                     }
                     "resume" -> {
                         if (takeoverOwner == null || takeoverOwner == id) {
@@ -253,11 +248,15 @@ class HubTransport(
                         }
                     }
                     "command" -> {
-                        if (takeoverOwner != null) {
-                            send(peer, JSONObject().put("type", "ack").put("message", "direct_takeover_active"))
-                        } else {
-                            listener.onRemoteCommand(json.optString("command"), json)
-                            send(peer, JSONObject().put("type", "ack").put("message", "command_accepted"))
+                        val commandId = json.optLong("commandId", -1L)
+                        listener.onRemoteCommand(json.optString("command"), json) { applied ->
+                            val ack = JSONObject()
+                                .put("type", "command_ack")
+                                .put("commandId", commandId)
+                                .put("ok", applied)
+                                .put("message", if (applied) "command_applied" else "command_failed")
+                            send(peer, ack)
+                            if (applied) publishStatus("Команда #$commandId виконана")
                         }
                     }
                 }

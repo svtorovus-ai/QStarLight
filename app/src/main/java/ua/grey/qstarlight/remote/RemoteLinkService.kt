@@ -232,13 +232,11 @@ class RemoteLinkService : Service() {
                 // Exchange synchronized settings immediately after authorization.
                 sendConfigNow()
 
-                if (prefs.forceDirect) {
-                    sendSimple("takeover")
-                    handler.postDelayed({ startDirectBle() }, 350)
-                } else {
-                    QStarBleService.start(this, Intent().setAction(QStarBleService.ACTION_RELEASE))
-                    sendSimple("resume")
-                }
+                // While a HUB is online it is the single GATT owner. Keeping a
+                // phone GATT link alive at the same time makes these controllers
+                // randomly reject writes while both UIs still look connected.
+                QStarBleService.start(this, Intent().setAction(QStarBleService.ACTION_RELEASE))
+                sendSimple("resume")
                 sendSimple("status_request")
                 sendDirectBleSnapshot()
                 flushPendingBleEvents()
@@ -436,6 +434,16 @@ class RemoteLinkService : Service() {
                     broadcast(EVENT_HUB_BLE, json.optString("message", "BLE"), host, line)
                 }
                 "ack" -> broadcast(EVENT_ACK, json.optString("message", "OK"), host, line)
+                "command_ack" -> {
+                    val commandId = json.optLong("commandId", -1L)
+                    val ok = json.optBoolean("ok", false)
+                    broadcast(
+                        if (ok) EVENT_ACK else EVENT_ERROR,
+                        if (ok) "Команда #$commandId виконана лампами" else "Команда #$commandId не виконана",
+                        host,
+                        line
+                    )
+                }
                 else -> broadcast(EVENT_MESSAGE, line, host, line)
             }
         } catch (t: Throwable) {
@@ -445,12 +453,9 @@ class RemoteLinkService : Service() {
 
     private fun handleCommandIntent(intent: Intent) {
         val cmd = intent.getStringExtra(EXTRA_COMMAND) ?: return
-        if (prefs.directControlActive()) {
-            dispatchDirect(intent)
-            return
-        }
         if (connected && writer != null) {
-            val json = JSONObject().put("type", "command").put("command", cmd)
+            val commandId = nextCommandId()
+            val json = JSONObject().put("type", "command").put("command", cmd).put("commandId", commandId)
             if (intent.hasExtra(EXTRA_WHITE)) json.put("white", intent.getIntExtra(EXTRA_WHITE, prefs.white))
             if (intent.hasExtra(EXTRA_BRIGHTNESS)) json.put("brightness", intent.getIntExtra(EXTRA_BRIGHTNESS, prefs.brightness))
             if (intent.hasExtra(EXTRA_POWER)) json.put("power", intent.getBooleanExtra(EXTRA_POWER, prefs.power))
@@ -458,7 +463,9 @@ class RemoteLinkService : Service() {
             if (intent.hasExtra(EXTRA_STROBE)) json.put("enabled", intent.getBooleanExtra(EXTRA_STROBE, false))
             if (intent.hasExtra(EXTRA_MAC)) json.put("mac", intent.getStringExtra(EXTRA_MAC))
             sendLine(json)
-            broadcast(EVENT_ROUTE, "Команда через магнітолу", currentHost)
+            broadcast(EVENT_ROUTE, "Команда #$commandId через магнітолу", currentHost)
+        } else if (prefs.directControlActive()) {
+            dispatchDirect(intent)
         } else if (cmd == ControlDispatcher.CMD_CONNECT) {
             pendingConnectMissing = true
             if (prefs.directControlActive() || prefs.directFallback) dispatchDirect(intent)
@@ -506,16 +513,20 @@ class RemoteLinkService : Service() {
 
     private fun applyRouteMode() {
         if (prefs.role() != BlePrefs.Role.PHONE) return
-        if (prefs.forceDirect) {
-            if (connected) sendSimple("takeover")
+        if (connected) {
+            QStarBleService.start(this, Intent().setAction(QStarBleService.ACTION_RELEASE))
+            sendSimple("resume")
+            broadcast(EVENT_ROUTE, "Магнітола online • BLE належить HUB")
+        } else if (prefs.forceDirect) {
             handler.postDelayed({ startDirectBle() }, 300)
             broadcast(EVENT_ROUTE, "Прямий BLE")
         } else {
             QStarBleService.start(this, Intent().setAction(QStarBleService.ACTION_RELEASE))
-            if (connected) sendSimple("resume")
             broadcast(EVENT_ROUTE, "Основний канал: магнітола")
         }
     }
+
+    private fun nextCommandId(): Long = commandIds.incrementAndGet()
 
     private fun startDirectBle() {
         QStarBleService.start(this, Intent().setAction(QStarBleService.ACTION_CONNECT))
@@ -839,6 +850,7 @@ class RemoteLinkService : Service() {
     }
 
     companion object {
+        private val commandIds = java.util.concurrent.atomic.AtomicLong(System.currentTimeMillis())
         const val DISCOVERY_PORT = 28760
         const val COMMAND_PORT = 28761
         const val UPDATE_PORT = 28762

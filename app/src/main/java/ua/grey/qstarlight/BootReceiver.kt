@@ -9,12 +9,34 @@ import ua.grey.qstarlight.update.UpdateScheduler
 
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action != Intent.ACTION_BOOT_COMPLETED && intent.action != Intent.ACTION_MY_PACKAGE_REPLACED) return
+        if (intent.action !in WAKE_ACTIONS) return
         val prefs = BlePrefs(context).also { it.ensureDefaults() }
         PresenceMonitor.ensure(context)
         UpdateScheduler.ensure(context)
-        if (prefs.role() == BlePrefs.Role.HUB && prefs.autoBoot) {
-            QStarBleService.start(context, Intent().setAction(QStarBleService.ACTION_BOOT))
+        if (prefs.role() == BlePrefs.Role.HUB) {
+            // HUB is an appliance mode: the service must come back after a real
+            // boot, an APK replacement and the quick-sleep wake used by Android
+            // head units.  autoBoot only controls the lamp greeting, not whether
+            // the HUB transport/GATT owner itself is alive.
+            val action = if (intent.action == Intent.ACTION_SCREEN_ON) {
+                QStarBleService.ACTION_HUB_WAKE
+            } else {
+                QStarBleService.ACTION_BOOT
+            }
+            QStarBleService.start(context, Intent().setAction(action))
         }
+    }
+
+    companion object {
+        private val WAKE_ACTIONS = setOf(
+            Intent.ACTION_BOOT_COMPLETED,
+            Intent.ACTION_LOCKED_BOOT_COMPLETED,
+            Intent.ACTION_USER_UNLOCKED,
+            Intent.ACTION_MY_PACKAGE_REPLACED,
+            Intent.ACTION_SCREEN_ON,
+            "android.intent.action.QUICKBOOT_POWERON",
+            "com.htc.intent.action.QUICKBOOT_POWERON",
+            "android.intent.action.REBOOT"
+        )
     }
 }

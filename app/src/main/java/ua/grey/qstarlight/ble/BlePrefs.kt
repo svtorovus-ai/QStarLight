@@ -246,16 +246,11 @@ class BlePrefs(private val context: Context) {
         // not merge their states with OR: a stale direct CONNECTED flag must
         // not make a HUB-owned lamp look alive (and vice versa).
         if (role() == Role.PHONE) {
-            if (forceDirect || hubRuntimeState != RuntimeLinkState.CONNECTED) {
-                return direct
-            }
-            return remote
+            return if (hubRuntimeState == RuntimeLinkState.CONNECTED) remote else direct
         }
-        return when {
-            local == RuntimeLinkState.CONNECTED || remote == RuntimeLinkState.CONNECTED -> RuntimeLinkState.CONNECTED
-            local == RuntimeLinkState.CONNECTING || remote == RuntimeLinkState.CONNECTING -> RuntimeLinkState.CONNECTING
-            else -> RuntimeLinkState.OFFLINE
-        }
+        // In HUB mode only this device's GATT callbacks are authoritative.
+        // Phone-side fallback telemetry must never turn a dead local link green.
+        return local
     }
 
     fun setLampRuntimeState(mac: String, state: RuntimeLinkState) {
@@ -307,7 +302,7 @@ class BlePrefs(private val context: Context) {
 
     /** True when commands from this phone must go to its own GATT links. */
     fun directControlActive(): Boolean =
-        role() == Role.PHONE && (forceDirect || hubRuntimeState != RuntimeLinkState.CONNECTED)
+        role() == Role.PHONE && hubRuntimeState != RuntimeLinkState.CONNECTED && forceDirect
 
     fun anyPhoneLinkConnected(): Boolean =
         hubRuntimeState == RuntimeLinkState.CONNECTED || anyDirectLampConnected()

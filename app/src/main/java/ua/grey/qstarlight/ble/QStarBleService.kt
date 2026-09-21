@@ -137,6 +137,17 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
                 ensureHubTransport()
                 if (!remoteTakeover) ensureConnections()
             }
+            ACTION_HUB_WAKE -> {
+                if (prefs.role() != BlePrefs.Role.HUB) return START_NOT_STICKY
+                interactive = true
+                oneShot = false
+                startForegroundSafe("Магнітола • відновлення QStar hub")
+                ensureHubTransport()
+                // Quick-sleep commonly leaves a stale BluetoothGatt object that
+                // still looks connected.  Recreate the links deterministically.
+                disconnectAll()
+                handler.postDelayed({ ensureConnections() }, 450)
+            }
             ACTION_CONNECT -> {
                 interactive = true
                 oneShot = false
@@ -220,7 +231,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
                 hubTransport?.publishStatus("Налаштування оновлено")
             }
             ACTION_BOOT -> {
-                if (!prefs.autoBoot) {
+                if (!prefs.autoBoot && prefs.role() != BlePrefs.Role.HUB) {
                     stopSelf()
                     return START_NOT_STICKY
                 }
@@ -231,8 +242,8 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
                 } else {
                     oneShot = true
                 }
-                bootPending = true
-                armWelcomeCycle("boot")
+                bootPending = prefs.autoBoot
+                if (bootPending) armWelcomeCycle("boot")
                 startForegroundSafe("Відновлення QStar")
                 startScan(4_000) { if (!remoteTakeover) ensureConnections() }
             }
@@ -1224,46 +1235,89 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         return PendingIntent.getBroadcast(this, requestCode, i, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     }
 
-    override fun onRemoteCommand(command: String, payload: JSONObject) {
+    override fun onRemoteCommand(command: String, payload: JSONObject, onComplete: (Boolean) -> Unit) {
         handler.post {
             when (command) {
                 ControlDispatcher.CMD_PRESET -> {
                     stopStrobeInternal(restore = false)
                     clearSafetyForCommand("remote_preset")
                     prefs.white = payload.optInt("white", prefs.white).coerceIn(0, 100)
-                    latestCct = prefs.white to prefs.brightness
-                    ensureConnections()
+                    ensureConnections {
+                        sendFrameAllResult(QStarProtocol.cctFrame(prefs.white, prefs.brightness), onComplete)
+                    }
                 }
                 ControlDispatcher.CMD_APPLY -> {
                     stopStrobeInternal(restore = false)
                     clearSafetyForCommand("remote_apply")
                     prefs.white = payload.optInt("white", prefs.white).coerceIn(0, 100)
                     prefs.brightness = payload.optInt("brightness", prefs.brightness).coerceIn(5, 100)
-                    latestCct = prefs.white to prefs.brightness
-                    ensureConnections()
+                    ensureConnections {
+                        sendFrameAllResult(QStarProtocol.cctFrame(prefs.white, prefs.brightness), onComplete)
+                    }
                 }
                 ControlDispatcher.CMD_POWER -> {
                     stopStrobeInternal(restore = false)
                     clearSafetyForCommand("remote_power")
                     prefs.power = payload.optBoolean("power", prefs.power)
-                    ensureConnections { sendPower(prefs.power) }
+                    ensureConnections { sendPowerResult(prefs.power, onComplete) }
                 }
                 ControlDispatcher.CMD_BRIGHTNESS_DELTA -> {
                     stopStrobeInternal(restore = false)
                     clearSafetyForCommand("remote_brightness")
                     prefs.brightness = (prefs.brightness + payload.optInt("delta", 0)).coerceIn(5, 100)
-                    latestCct = prefs.white to prefs.brightness
-                    ensureConnections()
+                    ensureConnections {
+                        sendFrameAllResult(QStarProtocol.cctFrame(prefs.white, prefs.brightness), onComplete)
+                    }
                 }
                 ControlDispatcher.CMD_STROBE -> {
                     clearSafetyForCommand("remote_strobe")
                     val enabled = if (payload.has("enabled")) payload.optBoolean("enabled") else !strobeActive
                     if (enabled) startStrobe() else stopStrobeInternal(restore = true)
+                    onComplete(allSelectedReady())
                 }
-                ControlDispatcher.CMD_CONNECT -> ensureConnections()
-                ControlDispatcher.CMD_CONNECT_DEVICE -> payload.optString("mac").takeIf { it.isNotBlank() }?.let(::ensureDevice)
+                ControlDispatcher.CMD_CONNECT -> ensureConnections { onComplete(allSelectedReady()) }
+                ControlDispatcher.CMD_CONNECT_DEVICE -> {
+                    val mac = payload.optString("mac")
+                    if (mac.isBlank()) onComplete(false) else {
+                        ensureDevice(mac)
+                        handler.postDelayed({ onComplete(connections[mac]?.isReady() == true) }, 1500)
+                    }
+                }
+                else -> onComplete(false)
             }
-            hubTransport?.publishStatus("Команда з телефону")
+        }
+    }
+
+    private fun sendFrameAllResult(frame: ByteArray, done: (Boolean) -> Unit) {
+        val refs = prefs.devices()
+        if (refs.isEmpty() || refs.any { connections[it.mac]?.isReady() != true }) {
+            event(EVENT_ERROR, message = "Waiting for both QStar lamps")
+            scheduleReconnect()
+            done(false)
+            return
+        }
+        val list = refs.map { connections[it.mac]!! }
+        var allOk = true
+        fun sendAt(index: Int) {
+            if (index >= list.size) {
+                done(allOk)
+                return
+            }
+            val connection = list[index]
+            connection.writeControl(frame) { ok ->
+                allOk = allOk && ok
+                event(if (ok) EVENT_WRITE else EVENT_ERROR, connection.mac, connection.name, QStarProtocol.hex(frame))
+                handler.postDelayed({ sendAt(index + 1) }, 45)
+            }
+        }
+        sendAt(0)
+    }
+
+    private fun sendPowerResult(on: Boolean, done: (Boolean) -> Unit) {
+        val frame = if (on) QStarProtocol.POWER_ON else QStarProtocol.POWER_OFF
+        sendFrameAllResult(frame) { ok ->
+            if (ok && !on) prefs.devices().forEach { lampPowerState[it.mac] = false }
+            done(ok)
         }
     }
 
@@ -1325,6 +1379,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
 
     companion object {
         const val ACTION_HUB_START = "ua.grey.qstarlight.HUB_START"
+        const val ACTION_HUB_WAKE = "ua.grey.qstarlight.HUB_WAKE"
         const val ACTION_SCAN = "ua.grey.qstarlight.SCAN"
         const val ACTION_CONNECT = "ua.grey.qstarlight.CONNECT"
         const val ACTION_CONNECT_DEVICE = "ua.grey.qstarlight.CONNECT_DEVICE"
