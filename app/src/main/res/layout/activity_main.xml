@@ -600,7 +600,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:visibility="gone"
-                        android:text="Тримати зв'язок з HUB у фоні"
+                        android:text="Автофон: підключення + 60 хв після розриву"
                         android:textColor="@color/text"
                         style="@style/Widget.QStar.Switch"
                         android:minHeight="@dimen/control_height" />

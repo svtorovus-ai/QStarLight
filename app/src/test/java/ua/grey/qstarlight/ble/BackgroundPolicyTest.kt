@@ -35,6 +35,7 @@ class BackgroundPolicyTest {
     @Test fun offlineGraceStartsOnlyWhenEveryPhoneLinkIsGone() {
         val now = 1_000_000L
         val until = prefs.startPhoneOfflineGrace(now)
+        assertEquals(60L * 60L * 1000L, BlePrefs.PHONE_OFFLINE_GRACE_MS)
         assertEquals(now + BlePrefs.PHONE_OFFLINE_GRACE_MS, until)
         assertTrue(prefs.phoneOfflineGraceActive(now + 1))
         assertFalse(prefs.phoneOfflineGraceActive(until + 1))

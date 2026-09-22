@@ -397,7 +397,8 @@ class MainActivity : AppCompatActivity() {
         switchKeep.isChecked = prefs.keepConnected
         switchDirectFallback.isChecked = prefs.directFallback
         switchForceDirect.isChecked = prefs.forceDirect
-        switchRemoteKeepAlive.isChecked = prefs.remoteKeepAlive
+        switchRemoteKeepAlive.isChecked = true
+        switchRemoteKeepAlive.isEnabled = false
         switchAutoPushUpdates.isChecked = prefs.autoPushUpdates
         switchSilentRootInstall.isChecked = prefs.silentRootInstall
 
@@ -557,7 +558,8 @@ class MainActivity : AppCompatActivity() {
         }
         switchKeep.setOnCheckedChangeListener { _, v -> if (!updatingUi) prefs.keepConnected = v }
         switchDirectFallback.setOnCheckedChangeListener { _, v -> if (!updatingUi) prefs.directFallback = v }
-        switchRemoteKeepAlive.setOnCheckedChangeListener { _, v -> if (!updatingUi) prefs.remoteKeepAlive = v }
+        // Background lifetime is role policy, not a user toggle: PHONE keeps
+        // links plus a 60-minute reconnect window; HUB stays alive permanently.
         switchAutoPushUpdates.setOnCheckedChangeListener { _, v -> if (!updatingUi) prefs.autoPushUpdates = v }
         switchSilentRootInstall.setOnCheckedChangeListener { _, v -> if (!updatingUi) prefs.silentRootInstall = v }
         switchForceDirect.setOnCheckedChangeListener { _, v ->

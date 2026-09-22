@@ -534,7 +534,12 @@ class BlePrefs(private val context: Context) {
         const val LEFT_NAME = "QStar~F072"
         const val RIGHT_DEFAULT_MAC = "C2:15:11:00:D3:5D"
         const val LEFT_DEFAULT_MAC = "F2:16:11:00:F0:72"
-        const val PHONE_OFFLINE_GRACE_MS = 30L * 60L * 1000L
+        /**
+         * PHONE only: keep reconnect services alive for one hour after the
+         * last HUB/direct-lamp link disappears. HUB lifetime is intentionally
+         * independent and remains persistent.
+         */
+        const val PHONE_OFFLINE_GRACE_MS = 60L * 60L * 1000L
 
         private const val KEY_CONFIG_REVISION = "sync_config_revision"
         private const val KEY_STARTUP_MODE = "startup_mode"

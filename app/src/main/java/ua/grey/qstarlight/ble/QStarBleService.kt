@@ -1016,6 +1016,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
 
         val until = prefs.startPhoneOfflineGrace()
         val remaining = until - System.currentTimeMillis()
+        DiagnosticLog.write("BLE SERVICE", "PHONE offline grace remaining=${remaining.coerceAtLeast(0L)}ms")
         if (remaining <= 0L) {
             stopPhoneBleSession()
             return
@@ -1040,6 +1041,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         if (prefs.role() != BlePrefs.Role.PHONE) return
         if (prefs.anyPhoneLinkConnected()) return
         prefs.clearPhoneOfflineGrace()
+        DiagnosticLog.write("BLE SERVICE", "PHONE offline grace expired; stopping direct BLE foreground service")
         interactive = false
         oneShot = false
         reconnectScheduled = false

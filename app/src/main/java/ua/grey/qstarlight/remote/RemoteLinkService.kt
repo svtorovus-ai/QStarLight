@@ -742,6 +742,7 @@ class RemoteLinkService : Service() {
 
         val until = prefs.startPhoneOfflineGrace()
         val remaining = until - System.currentTimeMillis()
+        DiagnosticLog.write("LINK", "PHONE offline grace remaining=${remaining.coerceAtLeast(0L)}ms")
         if (remaining <= 0L) {
             stopAfterOfflineGrace()
             return
@@ -763,6 +764,7 @@ class RemoteLinkService : Service() {
     private fun stopAfterOfflineGrace() {
         if (prefs.anyPhoneLinkConnected()) return
         prefs.clearPhoneOfflineGrace()
+        DiagnosticLog.write("LINK", "PHONE offline grace expired; stopping HUB-link foreground service")
         running.set(false)
         closeSocket()
         QStarBleService.start(this, Intent().setAction(QStarBleService.ACTION_RELEASE))
