@@ -55,6 +55,7 @@ import ua.grey.qstarlight.remote.RemoteLinkService
 import ua.grey.qstarlight.update.UpdateManager
 import ua.grey.qstarlight.update.UpdateScheduler
 import ua.grey.qstarlight.ui.LinkIndicator
+import ua.grey.qstarlight.ui.FrostedEdgeView
 import ua.grey.qstarlight.ui.StrobePreviewView
 import ua.grey.qstarlight.widget.QStarWidgetProvider
 import java.util.LinkedHashMap
@@ -83,6 +84,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvDiagnosticsInfo: TextView
     private lateinit var tvLogCount: TextView
     private lateinit var pageContainer: View
+    private lateinit var headerFade: FrostedEdgeView
+    private lateinit var bottomFade: FrostedEdgeView
     private lateinit var tabControl: Button
     private lateinit var tabSettings: Button
 
@@ -248,6 +251,12 @@ class MainActivity : AppCompatActivity() {
         tvDiagnosticsInfo = findViewById(R.id.tvDiagnosticsInfo)
         tvLogCount = findViewById(R.id.tvLogCount)
         pageContainer = findViewById(R.id.pageContainer)
+        headerFade = findViewById(R.id.headerFade)
+        bottomFade = findViewById(R.id.bottomFade)
+        headerFade.setEdge(FrostedEdgeView.Edge.TOP)
+        bottomFade.setEdge(FrostedEdgeView.Edge.BOTTOM)
+        headerFade.setSource(pageContainer)
+        bottomFade.setSource(pageContainer)
         tabControl = findViewById(R.id.tabControl)
         tabSettings = findViewById(R.id.tabSettings)
 
@@ -317,7 +326,11 @@ class MainActivity : AppCompatActivity() {
         btnWhite = findViewById(R.id.btnWhite)
         btnPushUpdate = findViewById(R.id.btnPushUpdate)
         btnInstallPermission = findViewById(R.id.btnInstallPermission)
+        controlPage.setOnScrollChangeListener { _, _, _, _, _ -> invalidateFrostedEdges() }
+        settingsPage.setOnScrollChangeListener { _, _, _, _, _ -> invalidateFrostedEdges() }
+        diagnosticsPage.setOnScrollChangeListener { _, _, _, _, _ -> invalidateFrostedEdges() }
         diagnosticsLogScroll.setOnScrollChangeListener { view, _, scrollY, _, _ ->
+            invalidateFrostedEdges()
             if (!logTouching) {
                 val scroll = view as ScrollView
                 val child = scroll.getChildAt(0)
@@ -711,7 +724,13 @@ class MainActivity : AppCompatActivity() {
             view.alpha = 1f
         }
         listOf(tabControl, tabSettings, tabDiagnostics).forEachIndexed { page, tab -> tab.isSelected = page == currentPage }
+        invalidateFrostedEdges()
         if (currentPage == 2) renderDiagnostics()
+    }
+
+    private fun invalidateFrostedEdges() {
+        if (::headerFade.isInitialized) headerFade.invalidateFromScroll()
+        if (::bottomFade.isInitialized) bottomFade.invalidateFromScroll()
     }
 
     private fun animateToPage(index: Int) {

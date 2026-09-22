@@ -3,9 +3,11 @@ package ua.grey.qstarlight.ui
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
+import android.graphics.Shader
 import android.util.AttributeSet
 import android.view.View
 import ua.grey.qstarlight.R
@@ -29,8 +31,14 @@ class StrobePreviewView @JvmOverloads constructor(
     private val lampPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val lensPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val beamPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val housingPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val accentPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val housingPath = Path()
+    private val innerPath = Path()
+    private val accentPath = Path()
     private val beamPath = Path()
     private val lampRect = RectF()
+    private val lensRect = RectF()
 
     private var mode = BlePrefs.StrobeMode.CLASSIC
     private var white = 100
@@ -106,14 +114,14 @@ class StrobePreviewView @JvmOverloads constructor(
         val leftWhite = step?.whites?.getOrNull(0) ?: white
         val rightWhite = step?.whites?.getOrNull(1) ?: white
 
-        val lampWidth = min(dp(138f), w * 0.37f)
-        val lampHeight = min(dp(53f), h * 0.34f)
+        val lampWidth = min(dp(150f), w * 0.38f)
+        val lampHeight = min(dp(62f), h * 0.37f)
         val gap = min(dp(18f), w * 0.06f)
         val leftX = w / 2f - gap / 2f - lampWidth
         val rightX = w / 2f + gap / 2f
         val top = dp(39f)
-        drawLamp(canvas, leftX, top, lampWidth, lampHeight, phase.leftOn, leftWhite, "ЛІВА")
-        drawLamp(canvas, rightX, top, lampWidth, lampHeight, phase.rightOn, rightWhite, "ПРАВА")
+        drawLamp(canvas, leftX, top, lampWidth, lampHeight, phase.leftOn, leftWhite, "ЛІВА", mirrored = false)
+        drawLamp(canvas, rightX, top, lampWidth, lampHeight, phase.rightOn, rightWhite, "ПРАВА", mirrored = true)
 
         textPaint.textSize = dp(10f)
         textPaint.color = color(R.color.muted)
@@ -129,42 +137,124 @@ class StrobePreviewView @JvmOverloads constructor(
         height: Float,
         on: Boolean,
         whiteValue: Int,
-        label: String
+        label: String,
+        mirrored: Boolean
     ) {
         val activeColor = mix(Color.rgb(255, 193, 7), Color.rgb(242, 249, 255), whiteValue / 100f)
         val level = if (on) brightness / 100f else 0.16f
         val alpha = (255f * level).toInt().coerceIn(18, 255)
-        val outline = Color.argb(if (on) 220 else 90, 90, 170, 187)
+        val outline = Color.argb(if (on) 220 else 82, 70, 180, 199)
+        val centerY = y + height * 0.52f
+        val innerSide = if (mirrored) x + width * 0.28f else x + width * 0.72f
+        val outerSide = if (mirrored) x + width * 0.90f else x + width * 0.10f
 
-        lampPaint.style = Paint.Style.FILL
-        lampPaint.color = Color.argb(if (on) 120 else 32, Color.red(activeColor), Color.green(activeColor), Color.blue(activeColor))
-        lampPaint.setShadowLayer(if (on) dp(12f) else 0f, 0f, 0f, activeColor)
-        lampRect.set(x, y, x + width, y + height)
-        canvas.drawRoundRect(lampRect, dp(12f), dp(12f), lampPaint)
-        lampPaint.clearShadowLayer()
-
+        // Angular, tapered housing — closer to a real modern projector headlamp than a card.
+        housingPath.reset()
+        if (!mirrored) {
+            housingPath.moveTo(x + width * 0.03f, y + height * 0.56f)
+            housingPath.quadTo(x + width * 0.02f, y + height * 0.22f, x + width * 0.20f, y + height * 0.10f)
+            housingPath.lineTo(x + width * 0.88f, y + height * 0.25f)
+            housingPath.quadTo(x + width * 0.98f, y + height * 0.36f, x + width * 0.95f, y + height * 0.55f)
+            housingPath.quadTo(x + width * 0.90f, y + height * 0.78f, x + width * 0.68f, y + height * 0.91f)
+            housingPath.lineTo(x + width * 0.15f, y + height * 0.83f)
+        } else {
+            housingPath.moveTo(x + width * 0.97f, y + height * 0.56f)
+            housingPath.quadTo(x + width * 0.98f, y + height * 0.22f, x + width * 0.80f, y + height * 0.10f)
+            housingPath.lineTo(x + width * 0.12f, y + height * 0.25f)
+            housingPath.quadTo(x + width * 0.02f, y + height * 0.36f, x + width * 0.05f, y + height * 0.55f)
+            housingPath.quadTo(x + width * 0.10f, y + height * 0.78f, x + width * 0.32f, y + height * 0.91f)
+            housingPath.lineTo(x + width * 0.85f, y + height * 0.83f)
+        }
+        housingPath.close()
+        housingPaint.style = Paint.Style.FILL
+        housingPaint.shader = LinearGradient(0f, y, 0f, y + height,
+            Color.rgb(24, 37, 47), Color.rgb(3, 8, 13), Shader.TileMode.CLAMP)
+        canvas.drawPath(housingPath, housingPaint)
+        housingPaint.shader = null
         borderPaint.color = outline
-        borderPaint.strokeWidth = dp(1f)
+        borderPaint.strokeWidth = dp(1.2f)
         borderPaint.style = Paint.Style.STROKE
-        canvas.drawRoundRect(lampRect, dp(12f), dp(12f), borderPaint)
+        canvas.drawPath(housingPath, borderPaint)
 
-        val lensX = x + width * 0.18f
-        val centerY = y + height / 2f
-        lensPaint.style = Paint.Style.FILL
-        lensPaint.color = Color.argb(alpha, Color.red(activeColor), Color.green(activeColor), Color.blue(activeColor))
-        lensPaint.setShadowLayer(if (on) dp(8f) else 0f, 0f, 0f, activeColor)
-        canvas.drawCircle(lensX, centerY, height * 0.28f, lensPaint)
-        lensPaint.clearShadowLayer()
+        // Recess and projector lens.
+        innerPath.reset()
+        if (!mirrored) {
+            innerPath.moveTo(x + width * 0.10f, y + height * 0.55f)
+            innerPath.lineTo(x + width * 0.23f, y + height * 0.22f)
+            innerPath.lineTo(x + width * 0.84f, y + height * 0.31f)
+            innerPath.lineTo(x + width * 0.78f, y + height * 0.78f)
+            innerPath.lineTo(x + width * 0.22f, y + height * 0.73f)
+        } else {
+            innerPath.moveTo(x + width * 0.90f, y + height * 0.55f)
+            innerPath.lineTo(x + width * 0.77f, y + height * 0.22f)
+            innerPath.lineTo(x + width * 0.16f, y + height * 0.31f)
+            innerPath.lineTo(x + width * 0.22f, y + height * 0.78f)
+            innerPath.lineTo(x + width * 0.78f, y + height * 0.73f)
+        }
+        innerPath.close()
+        lampPaint.style = Paint.Style.FILL
+        lampPaint.color = Color.argb(if (on) 115 else 48, 2, 9, 15)
+        canvas.drawPath(innerPath, lampPaint)
+        borderPaint.color = Color.argb(if (on) 170 else 70, 50, 108, 124)
+        borderPaint.strokeWidth = dp(0.8f)
+        canvas.drawPath(innerPath, borderPaint)
 
+        val beamStart = innerSide + if (mirrored) width * 0.04f else -width * 0.04f
         beamPaint.style = Paint.Style.FILL
-        beamPaint.color = Color.argb((alpha * 0.72f).toInt(), Color.red(activeColor), Color.green(activeColor), Color.blue(activeColor))
+        beamPaint.color = Color.argb((alpha * 0.46f).toInt(), Color.red(activeColor), Color.green(activeColor), Color.blue(activeColor))
+        beamPaint.setShadowLayer(if (on) dp(9f) else 0f, 0f, 0f, activeColor)
         beamPath.reset()
-        beamPath.moveTo(lensX + height * 0.12f, centerY - height * 0.18f)
-        beamPath.lineTo(x + width * 0.88f, centerY - height * 0.07f)
-        beamPath.lineTo(x + width * 0.88f, centerY + height * 0.07f)
-        beamPath.lineTo(lensX + height * 0.12f, centerY + height * 0.18f)
+        if (!mirrored) {
+            beamPath.moveTo(beamStart, centerY - height * 0.12f)
+            beamPath.lineTo(outerSide, centerY - height * 0.045f)
+            beamPath.lineTo(outerSide, centerY + height * 0.045f)
+            beamPath.lineTo(beamStart, centerY + height * 0.12f)
+        } else {
+            beamPath.moveTo(beamStart, centerY - height * 0.12f)
+            beamPath.lineTo(outerSide, centerY - height * 0.045f)
+            beamPath.lineTo(outerSide, centerY + height * 0.045f)
+            beamPath.lineTo(beamStart, centerY + height * 0.12f)
+        }
         beamPath.close()
         canvas.drawPath(beamPath, beamPaint)
+        beamPaint.clearShadowLayer()
+
+        lensRect.set(innerSide - width * 0.12f, centerY - height * 0.27f, innerSide + width * 0.12f, centerY + height * 0.27f)
+        lensPaint.style = Paint.Style.FILL
+        lensPaint.color = Color.rgb(10, 18, 25)
+        canvas.drawOval(lensRect, lensPaint)
+        lensPaint.style = Paint.Style.STROKE
+        lensPaint.strokeWidth = dp(1.2f)
+        lensPaint.color = Color.argb(if (on) 220 else 92, Color.red(activeColor), Color.green(activeColor), Color.blue(activeColor))
+        canvas.drawOval(lensRect, lensPaint)
+        lensPaint.style = Paint.Style.FILL
+        lensPaint.color = Color.argb(alpha, Color.red(activeColor), Color.green(activeColor), Color.blue(activeColor))
+        lensPaint.setShadowLayer(if (on) dp(10f) else 0f, 0f, 0f, activeColor)
+        canvas.drawOval(RectF(innerSide - width * 0.06f, centerY - height * 0.18f, innerSide + width * 0.06f, centerY + height * 0.18f), lensPaint)
+        lensPaint.clearShadowLayer()
+
+        // Thin DRL eyebrow and lower LED accent.
+        accentPaint.style = Paint.Style.STROKE
+        accentPaint.strokeCap = Paint.Cap.ROUND
+        accentPaint.strokeWidth = dp(2.2f)
+        accentPaint.color = Color.argb(if (on) 245 else 70, Color.red(activeColor), Color.green(activeColor), Color.blue(activeColor))
+        accentPaint.setShadowLayer(if (on) dp(5f) else 0f, 0f, 0f, activeColor)
+        accentPath.reset()
+        if (!mirrored) {
+            accentPath.moveTo(x + width * 0.17f, y + height * 0.21f)
+            accentPath.quadTo(x + width * 0.48f, y + height * 0.13f, x + width * 0.83f, y + height * 0.28f)
+        } else {
+            accentPath.moveTo(x + width * 0.83f, y + height * 0.21f)
+            accentPath.quadTo(x + width * 0.52f, y + height * 0.13f, x + width * 0.17f, y + height * 0.28f)
+        }
+        canvas.drawPath(accentPath, accentPaint)
+        accentPaint.strokeWidth = dp(1.2f)
+        accentPaint.color = Color.argb(if (on) 180 else 48, Color.red(activeColor), Color.green(activeColor), Color.blue(activeColor))
+        accentPath.reset()
+        accentPath.moveTo(x + width * 0.20f, y + height * 0.76f)
+        accentPath.lineTo(x + width * 0.60f, y + height * 0.83f)
+        canvas.drawPath(accentPath, accentPaint)
+        accentPaint.clearShadowLayer()
 
         textPaint.color = if (on) Color.argb(240, 244, 248, 250) else color(R.color.muted)
         textPaint.textSize = dp(9f)

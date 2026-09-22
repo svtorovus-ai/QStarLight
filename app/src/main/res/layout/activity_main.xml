@@ -1155,24 +1155,20 @@
             </LinearLayout>
         </FrameLayout>
     </FrameLayout>
-    <View
+    <ua.grey.qstarlight.ui.FrostedEdgeView
         android:id="@+id/headerFade"
         android:layout_width="match_parent"
-        android:layout_height="@dimen/header_fade_height"
+        android:layout_height="@dimen/header_blur_height"
         android:layout_gravity="top"
-        android:layout_marginTop="@dimen/header_height"
-        android:background="@drawable/bg_header_fade"
         android:elevation="8dp"
         android:importantForAccessibility="no"
         android:clickable="false"
         android:focusable="false" />
-    <View
+    <ua.grey.qstarlight.ui.FrostedEdgeView
         android:id="@+id/bottomFade"
         android:layout_width="match_parent"
-        android:layout_height="@dimen/header_fade_height"
+        android:layout_height="@dimen/bottom_blur_height"
         android:layout_gravity="bottom"
-        android:layout_marginBottom="@dimen/nav_height"
-        android:background="@drawable/bg_bottom_fade"
         android:elevation="8dp"
         android:importantForAccessibility="no"
         android:clickable="false"

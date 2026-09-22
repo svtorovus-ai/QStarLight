@@ -8,6 +8,8 @@
     <dimen name="header_height">76dp</dimen>
     <dimen name="nav_height">80dp</dimen>
     <dimen name="header_fade_height">34dp</dimen>
+    <dimen name="header_blur_height">110dp</dimen>
+    <dimen name="bottom_blur_height">114dp</dimen>
     <dimen name="header_content_padding">84dp</dimen>
     <dimen name="nav_content_padding">88dp</dimen>
     <dimen name="strobe_preview_height">176dp</dimen>
