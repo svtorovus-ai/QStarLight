@@ -45,9 +45,9 @@ class FrostedEdgeView @JvmOverloads constructor(
         isFocusable = false
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
         if (blurEnabled) {
-            snapshotPaint.renderEffect = RenderEffect.createBlurEffect(
+            snapshotPaint.setRenderEffect(RenderEffect.createBlurEffect(
                 dp(18f), dp(18f), Shader.TileMode.CLAMP
-            )
+            ))
         }
     }
 
