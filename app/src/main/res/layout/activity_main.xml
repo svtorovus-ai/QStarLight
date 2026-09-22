@@ -1,73 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout
+<FrameLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/rootLayout"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@drawable/bg_screen"
-    android:orientation="vertical">
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:background="@drawable/bg_header_glow"
-        android:elevation="7dp"
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:paddingStart="18dp"
-        android:paddingEnd="18dp"
-        android:id="@+id/appHeader"
-        android:minHeight="@dimen/header_height"
-        android:paddingTop="8dp"
-        android:paddingBottom="8dp">
-        <LinearLayout
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:orientation="vertical">
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="QSTAR LIGHT"
-                android:textColor="@color/text"
-                android:textSize="@dimen/text_brand"
-                android:textStyle="bold"
-                android:ellipsize="end"
-                android:maxLines="1"
-                android:id="@+id/appTitle" />
-            <TextView
-                android:id="@+id/tvVersion"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="v0.3.0"
-                android:textColor="@color/muted"
-                android:textSize="@dimen/text_caption" />
-        </LinearLayout>
-        <TextView
-            android:id="@+id/tvRoleBadge"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:background="@drawable/bg_badge"
-            android:gravity="center"
-            android:paddingStart="14dp"
-            android:paddingEnd="14dp"
-            android:text="ТЕЛЕФОН • REMOTE"
-            android:textColor="@color/accent"
-            android:textSize="@dimen/text_caption"
-            android:textStyle="bold"
-            android:minHeight="40dp"
-            android:paddingTop="8dp"
-            android:paddingBottom="8dp" />
-    </LinearLayout>
+    android:clipChildren="false"
+    android:clipToPadding="false">
     <FrameLayout
         android:id="@+id/pageContainer"
         android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1">
+        android:layout_height="match_parent">
         <ScrollView
             android:id="@+id/controlPage"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:fillViewport="true"
+            android:clipToPadding="false"
             android:overScrollMode="never">
             <ua.grey.qstarlight.ui.DashboardLayout
                 android:layout_width="match_parent"
@@ -75,7 +24,8 @@
                 android:orientation="vertical"
                 android:paddingStart="16dp"
                 android:paddingEnd="16dp"
-                android:paddingBottom="18dp"
+                android:paddingTop="@dimen/header_content_padding"
+                android:paddingBottom="@dimen/nav_content_padding"
                 android:id="@+id/controlDashboard">
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -417,6 +367,7 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:fillViewport="true"
+            android:clipToPadding="false"
             android:overScrollMode="never"
             android:visibility="gone">
             <LinearLayout
@@ -425,7 +376,8 @@
                 android:orientation="vertical"
                 android:paddingStart="16dp"
                 android:paddingEnd="16dp"
-                android:paddingBottom="20dp">
+                android:paddingTop="@dimen/header_content_padding"
+                android:paddingBottom="@dimen/nav_content_padding">
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -758,6 +710,7 @@
                         android:background="@drawable/bg_input"
                         android:paddingStart="10dp"
                         android:paddingEnd="10dp"
+                        android:spinnerMode="dropdown"
                         style="@style/Widget.QStar.Spinner"
                         android:minHeight="@dimen/control_height" />
                     <LinearLayout
@@ -895,8 +848,15 @@
                         android:background="@drawable/bg_input"
                         android:paddingStart="10dp"
                         android:paddingEnd="10dp"
+                        android:spinnerMode="dropdown"
                         style="@style/Widget.QStar.Spinner"
                         android:minHeight="@dimen/control_height" />
+                    <ua.grey.qstarlight.ui.StrobePreviewView
+                        android:id="@+id/strobePreview"
+                        android:layout_width="match_parent"
+                        android:layout_height="@dimen/strobe_preview_height"
+                        android:layout_marginTop="@dimen/group_gap"
+                        android:importantForAccessibility="no" />
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
@@ -1107,7 +1067,9 @@
                 android:layout_height="match_parent"
                 android:orientation="vertical"
                 android:paddingStart="16dp"
-                android:paddingEnd="16dp">
+                android:paddingEnd="16dp"
+                android:paddingTop="@dimen/header_content_padding"
+                android:paddingBottom="@dimen/nav_content_padding">
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -1193,11 +1155,86 @@
             </LinearLayout>
         </FrameLayout>
     </FrameLayout>
+    <View
+        android:id="@+id/headerFade"
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/header_fade_height"
+        android:layout_gravity="top"
+        android:layout_marginTop="@dimen/header_height"
+        android:background="@drawable/bg_header_fade"
+        android:elevation="8dp"
+        android:importantForAccessibility="no"
+        android:clickable="false"
+        android:focusable="false" />
+    <View
+        android:id="@+id/bottomFade"
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/header_fade_height"
+        android:layout_gravity="bottom"
+        android:layout_marginBottom="@dimen/nav_height"
+        android:background="@drawable/bg_bottom_fade"
+        android:elevation="8dp"
+        android:importantForAccessibility="no"
+        android:clickable="false"
+        android:focusable="false" />
+    <LinearLayout
+        android:id="@+id/appHeader"
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/header_height"
+        android:layout_gravity="top"
+        android:background="@drawable/bg_header_glass"
+        android:elevation="12dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="18dp"
+        android:paddingEnd="18dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="8dp">
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+            <TextView
+                android:id="@+id/appTitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="QSTAR LIGHT"
+                android:textColor="@color/text"
+                android:textSize="@dimen/text_brand"
+                android:textStyle="bold"
+                android:ellipsize="end"
+                android:maxLines="1" />
+            <TextView
+                android:id="@+id/tvVersion"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="v0.3.0"
+                android:textColor="@color/muted"
+                android:textSize="@dimen/text_caption" />
+        </LinearLayout>
+        <TextView
+            android:id="@+id/tvRoleBadge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_badge"
+            android:gravity="center"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:text="ТЕЛЕФОН • REMOTE"
+            android:textColor="@color/accent"
+            android:textSize="@dimen/text_caption"
+            android:textStyle="bold"
+            android:minHeight="40dp"
+            android:paddingTop="8dp"
+            android:paddingBottom="8dp" />
+    </LinearLayout>
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:background="@drawable/bg_bottom_nav"
-        android:elevation="9dp"
+        android:layout_height="@dimen/nav_height"
+        android:layout_gravity="bottom"
+        android:background="@drawable/bg_bottom_glass"
+        android:elevation="12dp"
         android:orientation="horizontal"
         android:padding="7dp"
         android:id="@+id/bottomNavigation"
@@ -1247,4 +1284,4 @@
             style="@style/Widget.QStar.Button"
             android:minHeight="@dimen/control_height" />
     </LinearLayout>
-</LinearLayout>
+</FrameLayout>

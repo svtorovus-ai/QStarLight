@@ -55,6 +55,7 @@ import ua.grey.qstarlight.remote.RemoteLinkService
 import ua.grey.qstarlight.update.UpdateManager
 import ua.grey.qstarlight.update.UpdateScheduler
 import ua.grey.qstarlight.ui.LinkIndicator
+import ua.grey.qstarlight.ui.StrobePreviewView
 import ua.grey.qstarlight.widget.QStarWidgetProvider
 import java.util.LinkedHashMap
 import java.text.SimpleDateFormat
@@ -135,6 +136,7 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var spinnerStartupMode: Spinner
     private lateinit var spinnerStrobeMode: Spinner
+    private lateinit var strobePreview: StrobePreviewView
     private lateinit var editRemotePin: EditText
     private lateinit var editHubIp: EditText
     private lateinit var hubPinGroup: View
@@ -299,6 +301,7 @@ class MainActivity : AppCompatActivity() {
 
         spinnerStartupMode = findViewById(R.id.spinnerStartupMode)
         spinnerStrobeMode = findViewById(R.id.spinnerStrobeMode)
+        strobePreview = findViewById(R.id.strobePreview)
         editRemotePin = findViewById(R.id.editRemotePin)
         editHubIp = findViewById(R.id.editHubIp)
         hubPinGroup = findViewById(R.id.hubPinGroup)
@@ -346,10 +349,10 @@ class MainActivity : AppCompatActivity() {
         val updated = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date(packageInfo.lastUpdateTime))
         tvVersion.text = "v${UpdateManager.versionName(this)} • оновлено $updated"
 
-        spinnerStartupMode.adapter = ArrayAdapter(this, R.layout.spinner_item, startupLabels)
-            .also { it.setDropDownViewResource(R.layout.spinner_item) }
-        spinnerStrobeMode.adapter = ArrayAdapter(this, R.layout.spinner_item, strobeLabels)
-            .also { it.setDropDownViewResource(R.layout.spinner_item) }
+        spinnerStartupMode.adapter = ArrayAdapter(this, R.layout.spinner_selected, startupLabels)
+            .also { it.setDropDownViewResource(R.layout.spinner_dropdown_item) }
+        spinnerStrobeMode.adapter = ArrayAdapter(this, R.layout.spinner_selected, strobeLabels)
+            .also { it.setDropDownViewResource(R.layout.spinner_dropdown_item) }
 
         seekTemp.max = 100
         seekBrightness.min = 5
@@ -985,6 +988,14 @@ class MainActivity : AppCompatActivity() {
         tvStrobeOff.text = "Пауза між імпульсами • ${prefs.strobeOffMs} мс"
         tvStrobePause.text = "Пауза між серіями • ${prefs.strobePauseMs} мс"
         tvStrobeMode.text = "${strobeModeLabel(prefs.strobeMode)} • ${colorLabel(prefs.strobeWhite)} • ${prefs.strobeBrightness}%"
+        strobePreview.setConfig(
+            prefs.strobeMode,
+            prefs.strobeWhite,
+            prefs.strobeBrightness,
+            prefs.strobeOnMs,
+            prefs.strobeOffMs,
+            prefs.strobePauseMs
+        )
     }
 
     private fun colorLabel(white: Int): String = when {

@@ -30,7 +30,11 @@
     </style>
     <style name="Widget.QStar.Spinner" parent="Widget.AppCompat.Spinner">
         <item name="android:minHeight">@dimen/control_height</item>
-        <item name="android:popupBackground">@drawable/bg_card</item>
+        <item name="android:spinnerMode">dropdown</item>
+        <item name="android:popupBackground">@drawable/bg_spinner_popup</item>
+        <item name="android:dropDownVerticalOffset">4dp</item>
+        <item name="android:dropDownHorizontalOffset">0dp</item>
+        <item name="android:popupElevation">14dp</item>
     </style>
     <style name="Widget.QStar.Slider" parent="Widget.AppCompat.SeekBar">
         <item name="android:minHeight">@dimen/slider_height</item>

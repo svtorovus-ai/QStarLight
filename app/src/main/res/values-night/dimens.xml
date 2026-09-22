@@ -8,6 +8,10 @@
     <dimen name="lamp_cell_height">76dp</dimen>
     <dimen name="header_height">64dp</dimen>
     <dimen name="nav_height">54dp</dimen>
+    <dimen name="header_fade_height">30dp</dimen>
+    <dimen name="header_content_padding">72dp</dimen>
+    <dimen name="nav_content_padding">62dp</dimen>
+    <dimen name="strobe_preview_height">148dp</dimen>
     <dimen name="square_button">48dp</dimen>
     <dimen name="reconnect_width">104dp</dimen>
     <dimen name="strobe_width">108dp</dimen>
