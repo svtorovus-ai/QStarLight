@@ -50,7 +50,6 @@ class StrobePreviewView @JvmOverloads constructor(
     private var attached = false
 
     init {
-        setLayerType(LAYER_TYPE_SOFTWARE, null)
         backgroundPaint.color = color(R.color.control_group)
         borderPaint.style = Paint.Style.STROKE
         borderPaint.strokeWidth = dp(1f)
@@ -168,7 +167,7 @@ class StrobePreviewView @JvmOverloads constructor(
         housingPath.close()
         housingPaint.style = Paint.Style.FILL
         housingPaint.shader = LinearGradient(0f, y, 0f, y + height,
-            Color.rgb(24, 37, 47), Color.rgb(3, 8, 13), Shader.TileMode.CLAMP)
+            Color.rgb(34, 55, 66), Color.rgb(7, 14, 20), Shader.TileMode.CLAMP)
         canvas.drawPath(housingPath, housingPaint)
         housingPaint.shader = null
         borderPaint.color = outline
@@ -193,52 +192,47 @@ class StrobePreviewView @JvmOverloads constructor(
         }
         innerPath.close()
         lampPaint.style = Paint.Style.FILL
-        lampPaint.color = Color.argb(if (on) 115 else 48, 2, 9, 15)
+        lampPaint.color = Color.argb(if (on) 228 else 174, 2, 9, 15)
         canvas.drawPath(innerPath, lampPaint)
         borderPaint.color = Color.argb(if (on) 170 else 70, 50, 108, 124)
         borderPaint.strokeWidth = dp(0.8f)
         canvas.drawPath(innerPath, borderPaint)
 
-        val beamStart = innerSide + if (mirrored) width * 0.04f else -width * 0.04f
-        beamPaint.style = Paint.Style.FILL
-        beamPaint.color = Color.argb((alpha * 0.46f).toInt(), Color.red(activeColor), Color.green(activeColor), Color.blue(activeColor))
-        beamPaint.setShadowLayer(if (on) dp(9f) else 0f, 0f, 0f, activeColor)
+        // Reflector highlight: a narrow light bar reads as optics, not a random beam.
+        beamPaint.style = Paint.Style.STROKE
+        beamPaint.strokeCap = Paint.Cap.ROUND
+        beamPaint.strokeWidth = dp(2.4f)
+        beamPaint.color = Color.argb(if (on) 205 else 38, Color.red(activeColor), Color.green(activeColor), Color.blue(activeColor))
         beamPath.reset()
         if (!mirrored) {
-            beamPath.moveTo(beamStart, centerY - height * 0.12f)
-            beamPath.lineTo(outerSide, centerY - height * 0.045f)
-            beamPath.lineTo(outerSide, centerY + height * 0.045f)
-            beamPath.lineTo(beamStart, centerY + height * 0.12f)
+            beamPath.moveTo(x + width * 0.18f, centerY + height * 0.03f)
+            beamPath.quadTo(x + width * 0.45f, centerY - height * 0.07f, innerSide - width * 0.12f, centerY - height * 0.02f)
         } else {
-            beamPath.moveTo(beamStart, centerY - height * 0.12f)
-            beamPath.lineTo(outerSide, centerY - height * 0.045f)
-            beamPath.lineTo(outerSide, centerY + height * 0.045f)
-            beamPath.lineTo(beamStart, centerY + height * 0.12f)
+            beamPath.moveTo(x + width * 0.82f, centerY + height * 0.03f)
+            beamPath.quadTo(x + width * 0.55f, centerY - height * 0.07f, innerSide + width * 0.12f, centerY - height * 0.02f)
         }
-        beamPath.close()
         canvas.drawPath(beamPath, beamPaint)
-        beamPaint.clearShadowLayer()
 
         lensRect.set(innerSide - width * 0.12f, centerY - height * 0.27f, innerSide + width * 0.12f, centerY + height * 0.27f)
         lensPaint.style = Paint.Style.FILL
-        lensPaint.color = Color.rgb(10, 18, 25)
+        lensPaint.color = Color.rgb(5, 12, 18)
         canvas.drawOval(lensRect, lensPaint)
         lensPaint.style = Paint.Style.STROKE
-        lensPaint.strokeWidth = dp(1.2f)
+        lensPaint.strokeWidth = dp(1.8f)
         lensPaint.color = Color.argb(if (on) 220 else 92, Color.red(activeColor), Color.green(activeColor), Color.blue(activeColor))
         canvas.drawOval(lensRect, lensPaint)
+        lensPaint.strokeWidth = dp(0.9f)
+        lensPaint.color = Color.argb(if (on) 180 else 65, 180, 210, 218)
+        canvas.drawOval(RectF(innerSide - width * 0.09f, centerY - height * 0.21f, innerSide + width * 0.09f, centerY + height * 0.21f), lensPaint)
         lensPaint.style = Paint.Style.FILL
         lensPaint.color = Color.argb(alpha, Color.red(activeColor), Color.green(activeColor), Color.blue(activeColor))
-        lensPaint.setShadowLayer(if (on) dp(10f) else 0f, 0f, 0f, activeColor)
         canvas.drawOval(RectF(innerSide - width * 0.06f, centerY - height * 0.18f, innerSide + width * 0.06f, centerY + height * 0.18f), lensPaint)
-        lensPaint.clearShadowLayer()
 
         // Thin DRL eyebrow and lower LED accent.
         accentPaint.style = Paint.Style.STROKE
         accentPaint.strokeCap = Paint.Cap.ROUND
-        accentPaint.strokeWidth = dp(2.2f)
-        accentPaint.color = Color.argb(if (on) 245 else 70, Color.red(activeColor), Color.green(activeColor), Color.blue(activeColor))
-        accentPaint.setShadowLayer(if (on) dp(5f) else 0f, 0f, 0f, activeColor)
+        accentPaint.strokeWidth = dp(2.8f)
+        accentPaint.color = Color.argb(if (on) 250 else 92, Color.red(activeColor), Color.green(activeColor), Color.blue(activeColor))
         accentPath.reset()
         if (!mirrored) {
             accentPath.moveTo(x + width * 0.17f, y + height * 0.21f)
@@ -254,7 +248,6 @@ class StrobePreviewView @JvmOverloads constructor(
         accentPath.moveTo(x + width * 0.20f, y + height * 0.76f)
         accentPath.lineTo(x + width * 0.60f, y + height * 0.83f)
         canvas.drawPath(accentPath, accentPaint)
-        accentPaint.clearShadowLayer()
 
         textPaint.color = if (on) Color.argb(240, 244, 248, 250) else color(R.color.muted)
         textPaint.textSize = dp(9f)
