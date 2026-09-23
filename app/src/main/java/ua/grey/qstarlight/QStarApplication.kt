@@ -12,7 +12,12 @@ class QStarApplication : Application() {
         super.onCreate()
         val prefs = BlePrefs(this).also { it.ensureDefaults(); it.resetRuntimeLinkStates() }
         DiagnosticLog.initialize(this)
-        PresenceMonitor.ensure(this)
+        if (prefs.role() == BlePrefs.Role.HUB ||
+            prefs.anyPhoneLinkConnected() || prefs.phoneOfflineGraceActive()) {
+            PresenceMonitor.ensure(this)
+        } else {
+            PresenceMonitor.stop(this)
+        }
         UpdateScheduler.ensure(this)
         // Any process recreation on a head unit is also a recovery point. HUB
         // mode must not depend on the Activity being opened by the driver.

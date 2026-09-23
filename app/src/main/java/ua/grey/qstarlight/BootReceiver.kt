@@ -11,7 +11,12 @@ class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action !in WAKE_ACTIONS) return
         val prefs = BlePrefs(context).also { it.ensureDefaults() }
-        PresenceMonitor.ensure(context)
+        if (prefs.role() == BlePrefs.Role.HUB ||
+            prefs.anyPhoneLinkConnected() || prefs.phoneOfflineGraceActive()) {
+            PresenceMonitor.ensure(context)
+        } else {
+            PresenceMonitor.stop(context)
+        }
         UpdateScheduler.ensure(context)
         if (prefs.role() == BlePrefs.Role.HUB) {
             // HUB is an appliance mode: the service must come back after a real

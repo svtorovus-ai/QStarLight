@@ -26,6 +26,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import org.json.JSONObject
 import ua.grey.qstarlight.MainActivity
+import ua.grey.qstarlight.PresenceMonitor
 import ua.grey.qstarlight.R
 import ua.grey.qstarlight.control.ControlActionReceiver
 import ua.grey.qstarlight.control.ControlDispatcher
@@ -88,7 +89,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         createNotificationChannel()
         if (prefs.role() == BlePrefs.Role.HUB) {
             hubTransport = HubTransport(this, prefs, this)
-        } else {
+        } else if (prefs.anyPhoneLinkConnected() || prefs.phoneOfflineGraceActive()) {
             reconcilePhoneLifetime()
         }
     }
@@ -112,7 +113,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
             return if (prefs.role() == BlePrefs.Role.HUB) START_STICKY else START_NOT_STICKY
         }
 
-        if (prefs.role() == BlePrefs.Role.PHONE && intent.action != ACTION_RELEASE) {
+        if (prefs.role() == BlePrefs.Role.PHONE && intent.action != ACTION_RELEASE && shouldStartPhoneSession(intent.action)) {
             if (!prefs.anyPhoneLinkConnected() && !prefs.phoneOfflineGraceActive()) prefs.startPhoneOfflineGrace()
             reconcilePhoneLifetime()
         }
@@ -229,6 +230,12 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
                 ensureHubTransport()
                 hubTransport?.publishConfig()
                 hubTransport?.publishStatus("Налаштування оновлено")
+                if (prefs.role() == BlePrefs.Role.PHONE &&
+                    !prefs.anyPhoneLinkConnected() && !prefs.phoneOfflineGraceActive()) {
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf()
+                    return START_NOT_STICKY
+                }
             }
             ACTION_BOOT -> {
                 if (!prefs.autoBoot && prefs.role() != BlePrefs.Role.HUB) {
@@ -257,6 +264,18 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         hubTransport?.start()
         hubTransport?.publishStatus(if (remoteTakeover) "Телефон керує напряму" else "Магнітола керує лампами")
     }
+
+    private fun shouldStartPhoneSession(action: String?): Boolean = action in setOf(
+        ACTION_SCAN,
+        ACTION_CONNECT,
+        ACTION_CONNECT_DEVICE,
+        ACTION_APPLY,
+        ACTION_POWER,
+        ACTION_PRESET,
+        ACTION_BRIGHTNESS_DELTA,
+        ACTION_STROBE,
+        ACTION_BOOT
+    )
 
     private fun armWelcomeCycle(reason: String) {
         if (welcomeInProgress) return
@@ -1041,6 +1060,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         if (prefs.role() != BlePrefs.Role.PHONE) return
         if (prefs.anyPhoneLinkConnected()) return
         prefs.clearPhoneOfflineGrace()
+        PresenceMonitor.stop(this)
         DiagnosticLog.write("BLE SERVICE", "PHONE offline grace expired; stopping direct BLE foreground service")
         interactive = false
         oneShot = false

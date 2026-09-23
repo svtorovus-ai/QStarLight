@@ -33,14 +33,7 @@ object PresenceMonitor {
         if (!adapter.isEnabled) return
         val scanner = adapter.bluetoothLeScanner ?: return
 
-        val flags = PendingIntent.FLAG_UPDATE_CURRENT or
-            if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0
-        val pending = PendingIntent.getBroadcast(
-            context,
-            REQUEST_CODE,
-            Intent(context, AutoWakeReceiver::class.java).setAction(ACTION_BLE_PRESENCE),
-            flags
-        )
+        val pending = pendingIntent(context)
         val filters = listOf(
             ScanFilter.Builder().setDeviceName(BlePrefs.RIGHT_NAME).build(),
             ScanFilter.Builder().setDeviceName(BlePrefs.LEFT_NAME).build()
@@ -51,6 +44,26 @@ object PresenceMonitor {
             .build()
         runCatching { scanner.startScan(filters, settings, pending) }
     }
+
+    fun stop(context: Context) {
+        val granted = if (Build.VERSION.SDK_INT >= 31) {
+            ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED
+        } else {
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        }
+        if (!granted) return
+        val adapter = (context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter ?: return
+        val scanner = adapter.bluetoothLeScanner ?: return
+        runCatching { scanner.stopScan(pendingIntent(context)) }
+    }
+
+    private fun pendingIntent(context: Context): PendingIntent = PendingIntent.getBroadcast(
+            context,
+            REQUEST_CODE,
+            Intent(context, AutoWakeReceiver::class.java).setAction(ACTION_BLE_PRESENCE),
+            PendingIntent.FLAG_UPDATE_CURRENT or
+                if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0
+        )
 }
 
 class AutoWakeReceiver : BroadcastReceiver() {
@@ -68,7 +81,8 @@ class AutoWakeReceiver : BroadcastReceiver() {
             }
             WifiManager.NETWORK_STATE_CHANGED_ACTION,
             WifiManager.WIFI_STATE_CHANGED_ACTION -> {
-                if (prefs.role() == BlePrefs.Role.PHONE) {
+                if (prefs.role() == BlePrefs.Role.PHONE &&
+                    (prefs.anyPhoneLinkConnected() || prefs.phoneOfflineGraceActive())) {
                     // A generic Wi-Fi change is not proof that the car is nearby.
                     // Probe once and only keep running if the QStar HUB actually answers.
                     RemoteLinkService.probeHub(context)

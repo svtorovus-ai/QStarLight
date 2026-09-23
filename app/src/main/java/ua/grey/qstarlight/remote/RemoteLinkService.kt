@@ -17,6 +17,7 @@ import androidx.core.content.ContextCompat
 import org.json.JSONArray
 import org.json.JSONObject
 import ua.grey.qstarlight.MainActivity
+import ua.grey.qstarlight.PresenceMonitor
 import ua.grey.qstarlight.R
 import ua.grey.qstarlight.ble.BlePrefs
 import ua.grey.qstarlight.ble.QStarBleService
@@ -79,9 +80,7 @@ class RemoteLinkService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (prefs.role() == BlePrefs.Role.PHONE &&
-            intent?.action != ACTION_STOP &&
-            intent?.action != ACTION_PROBE_HUB) {
+        if (prefs.role() == BlePrefs.Role.PHONE && shouldStartPhoneSession(intent?.action)) {
             if (!prefs.anyPhoneLinkConnected() && !prefs.phoneOfflineGraceActive()) {
                 prefs.startPhoneOfflineGrace()
             }
@@ -92,6 +91,7 @@ class RemoteLinkService : Service() {
                 running.set(false)
                 closeSocket()
                 QStarBleService.start(this, Intent().setAction(QStarBleService.ACTION_RELEASE))
+                PresenceMonitor.stop(this)
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
                 return START_NOT_STICKY
@@ -163,14 +163,23 @@ class RemoteLinkService : Service() {
         thread(name = "QStarRemoteLink", isDaemon = true) { connectionLoop() }
     }
 
+    private fun shouldStartPhoneSession(action: String?): Boolean = action in setOf(
+        ACTION_START,
+        ACTION_AUTO_WAKE,
+        ACTION_ROUTE_CHANGED,
+        ACTION_COMMAND,
+        ACTION_PUSH_CONFIG,
+        ACTION_PUSH_UPDATE
+    )
+
     private fun connectionLoop() {
         while (running.get()) {
             if (prefs.role() != BlePrefs.Role.PHONE) {
-                running.set(false)
+                finishIdleService()
                 break
             }
             if (!prefs.anyPhoneLinkConnected() && !prefs.phoneOfflineGraceActive() && !probeOnly) {
-                running.set(false)
+                finishIdleService()
                 break
             }
             prefs.hubRuntimeState = BlePrefs.RuntimeLinkState.CONNECTING
@@ -180,8 +189,7 @@ class RemoteLinkService : Service() {
             if (host == null) {
                 setConnected(false, "Магнітолу не знайдено")
                 if (probeOnly) {
-                    probeOnly = false
-                    running.set(false)
+                    finishProbeOnly()
                     break
                 }
                 if (autoLampWake || prefs.directControlActive() || prefs.directFallback) startDirectBle()
@@ -265,6 +273,10 @@ class RemoteLinkService : Service() {
                 closeSocket()
                 setConnected(false, "Магнітола offline", host)
                 hubVersionCode = -1L
+                if (probeOnly) {
+                    finishProbeOnly()
+                    break
+                }
                 if (prefs.forceDirect) {
                     startDirectBle()
                 } else if (prefs.directFallback) {
@@ -764,12 +776,29 @@ class RemoteLinkService : Service() {
     private fun stopAfterOfflineGrace() {
         if (prefs.anyPhoneLinkConnected()) return
         prefs.clearPhoneOfflineGrace()
+        PresenceMonitor.stop(this)
         DiagnosticLog.write("LINK", "PHONE offline grace expired; stopping HUB-link foreground service")
         running.set(false)
         closeSocket()
         QStarBleService.start(this, Intent().setAction(QStarBleService.ACTION_RELEASE))
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
+    }
+
+    /** A Wi-Fi probe is a one-shot check, not a persistent foreground service. */
+    private fun finishProbeOnly() {
+        if (!probeOnly) return
+        probeOnly = false
+        finishIdleService()
+    }
+
+    private fun finishIdleService() {
+        running.set(false)
+        closeSocket()
+        handler.post {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+        }
     }
 
     private fun setConnected(value: Boolean, message: String, host: String? = null) {
