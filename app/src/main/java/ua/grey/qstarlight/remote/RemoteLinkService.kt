@@ -70,6 +70,8 @@ class RemoteLinkService : Service() {
     @Volatile private var probeOnly = false
     @Volatile private var pendingConnectMissing = false
     private var sessionStopRunnable: Runnable? = null
+    /** Prevent teardown callbacks/restarts from arming a fresh phone grace period. */
+    @Volatile private var phoneSessionStopping = false
 
     override fun onCreate() {
         super.onCreate()
@@ -80,7 +82,22 @@ class RemoteLinkService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Android may recreate a service with a null/late intent.  That is not
+        // a new user connection request: never create a fresh one-hour grace
+        // window merely because the old process was restarted.
+        if (prefs.role() == BlePrefs.Role.PHONE &&
+            intent?.action !in setOf(
+                ACTION_START, ACTION_AUTO_WAKE, ACTION_ROUTE_CHANGED,
+                ACTION_COMMAND, ACTION_PUSH_CONFIG, ACTION_PUSH_UPDATE
+            ) &&
+            !prefs.anyPhoneLinkConnected() && !prefs.phoneOfflineGraceActive()) {
+            PresenceMonitor.stop(this)
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+            return START_NOT_STICKY
+        }
         if (prefs.role() == BlePrefs.Role.PHONE && shouldStartPhoneSession(intent?.action)) {
+            phoneSessionStopping = false
             if (!prefs.anyPhoneLinkConnected() && !prefs.phoneOfflineGraceActive()) {
                 prefs.startPhoneOfflineGrace()
             }
@@ -744,6 +761,7 @@ class RemoteLinkService : Service() {
 
     private fun reconcilePhoneLifetime() {
         if (prefs.role() != BlePrefs.Role.PHONE) return
+        if (phoneSessionStopping) return
         sessionStopRunnable?.let(handler::removeCallbacks)
         sessionStopRunnable = null
 
@@ -775,6 +793,7 @@ class RemoteLinkService : Service() {
 
     private fun stopAfterOfflineGrace() {
         if (prefs.anyPhoneLinkConnected()) return
+        phoneSessionStopping = true
         prefs.clearPhoneOfflineGrace()
         PresenceMonitor.stop(this)
         DiagnosticLog.write("LINK", "PHONE offline grace expired; stopping HUB-link foreground service")

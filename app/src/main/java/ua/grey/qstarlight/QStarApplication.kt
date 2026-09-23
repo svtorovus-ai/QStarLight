@@ -6,6 +6,7 @@ import ua.grey.qstarlight.update.UpdateScheduler
 import ua.grey.qstarlight.ble.BlePrefs
 import ua.grey.qstarlight.ble.QStarBleService
 import android.content.Intent
+import ua.grey.qstarlight.remote.RemoteLinkService
 
 class QStarApplication : Application() {
     override fun onCreate() {
@@ -17,6 +18,10 @@ class QStarApplication : Application() {
             PresenceMonitor.ensure(this)
         } else {
             PresenceMonitor.stop(this)
+            // A process recreation must not leave a stale foreground service
+            // from an earlier session visible on a PHONE with no connection.
+            stopService(Intent(this, QStarBleService::class.java))
+            stopService(Intent(this, RemoteLinkService::class.java))
         }
         UpdateScheduler.ensure(this)
         // Any process recreation on a head unit is also a recovery point. HUB

@@ -685,7 +685,12 @@ class MainActivity : AppCompatActivity() {
         ContextCompat.registerReceiver(
             this, remoteReceiver, IntentFilter(RemoteLinkService.ACTION_EVENT), ContextCompat.RECEIVER_NOT_EXPORTED
         )
-        PresenceMonitor.ensure(this)
+        if (prefs.role() == BlePrefs.Role.HUB ||
+            prefs.anyPhoneLinkConnected() || prefs.phoneOfflineGraceActive()) {
+            PresenceMonitor.ensure(this)
+        } else {
+            PresenceMonitor.stop(this)
+        }
         UpdateScheduler.ensure(this)
         runCatching { if (ensurePermissions(false) || prefs.role() == BlePrefs.Role.PHONE) ControlDispatcher.connect(this) }
             .onFailure { appendLog("START ERROR ${it.javaClass.simpleName}: ${it.message.orEmpty()}") }

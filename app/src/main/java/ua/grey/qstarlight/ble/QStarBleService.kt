@@ -78,6 +78,8 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
     // Connection/boot actions arm the greeting explicitly.
     private var startupPending = false
     private var phoneStopRunnable: Runnable? = null
+    /** Prevent disconnect callbacks during shutdown from arming a new grace period. */
+    @Volatile private var phoneSessionStopping = false
 
     private var strobeActive = false
     private var strobeGeneration = 0L
@@ -114,6 +116,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         }
 
         if (prefs.role() == BlePrefs.Role.PHONE && intent.action != ACTION_RELEASE && shouldStartPhoneSession(intent.action)) {
+            phoneSessionStopping = false
             if (!prefs.anyPhoneLinkConnected() && !prefs.phoneOfflineGraceActive()) prefs.startPhoneOfflineGrace()
             reconcilePhoneLifetime()
         }
@@ -1025,6 +1028,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
 
     private fun reconcilePhoneLifetime() {
         if (prefs.role() != BlePrefs.Role.PHONE) return
+        if (phoneSessionStopping) return
         phoneStopRunnable?.let(handler::removeCallbacks)
         phoneStopRunnable = null
 
@@ -1059,6 +1063,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
     private fun stopPhoneBleSession() {
         if (prefs.role() != BlePrefs.Role.PHONE) return
         if (prefs.anyPhoneLinkConnected()) return
+        phoneSessionStopping = true
         prefs.clearPhoneOfflineGrace()
         PresenceMonitor.stop(this)
         DiagnosticLog.write("BLE SERVICE", "PHONE offline grace expired; stopping direct BLE foreground service")
