@@ -65,8 +65,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
     private var welcomeStateAttempts = 0
     private var welcomeCheckScheduled = false
     private var welcomeInProgress = false
-    // If the lamps are already on when this service first sees both of them,
-    // keep the one-shot welcome armed until a real both-off state is observed.
+    private var welcomeExecutedThisSession = false
     private var welcomeWaitingForOff = false
     private var latestCct: Pair<Int, Int>? = null
     private var sendingCct = false
@@ -333,6 +332,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         readyMacs.clear()
         connectPlan.clear()
         connectingMac = null
+        welcomeExecutedThisSession = false
         prefs.devices().forEach { ref ->
             if (prefs.role() == BlePrefs.Role.PHONE) {
                 prefs.setDirectLampRuntimeState(ref.mac, BlePrefs.RuntimeLinkState.OFFLINE)
@@ -592,6 +592,16 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         pendingAfterReady?.let { callback ->
             pendingAfterReady = null
             callback.invoke()
+            return
+        }
+        if (prefs.welcomeOnConnect && !welcomeExecutedThisSession && !welcomeInProgress && !safetyFallbackActive && prefs.devices().size >= 2) {
+            welcomeExecutedThisSession = true
+            welcomeInProgress = true
+            bootPending = false
+            startupPending = false
+            welcomeWaitingForOff = false
+            DiagnosticLog.write("WELCOME", "Triggering welcome on both lamps connected (role=${prefs.role()})")
+            runBootRoutine()
             return
         }
         val greetingPending = bootPending || startupPending || welcomeWaitingForOff
@@ -1183,11 +1193,8 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         event(EVENT_ERROR, mac, connections[mac]?.name, message)
         readyMacs.remove(mac)
         lampPowerState.remove(mac)
+        if (readyMacs.isEmpty()) welcomeExecutedThisSession = false
         if (connectingMac == mac) connectingMac = null
-        // A single lamp becoming READY during the initial pair-up is not a
-        // runtime failure.  Failsafe is valid only after both lamps were
-        // READY together; otherwise a normal GATT race turns yellow startup
-        // into an unwanted white emergency state.
         if (pairWasReady && !remoteTakeover && !strobeActive) activateSafetyFallback("error:$message")
         if (!remoteTakeover) scheduleReconnect(120)
     }
@@ -1206,6 +1213,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         event(EVENT_DISCONNECTED, mac, connections[mac]?.name, "status=$status")
         readyMacs.remove(mac)
         lampPowerState.remove(mac)
+        if (readyMacs.isEmpty()) welcomeExecutedThisSession = false
         if (connectingMac == mac) connectingMac = null
         if (pairWasReady && !remoteTakeover && !strobeActive) activateSafetyFallback("disconnect:$status")
         if (prefs.role() == BlePrefs.Role.HUB && readyMacs.isEmpty() && !remoteTakeover) pairWasReady = false

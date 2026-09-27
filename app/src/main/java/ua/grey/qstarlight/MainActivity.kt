@@ -39,6 +39,7 @@ import android.widget.Spinner
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.content.ContextCompat
@@ -235,6 +236,11 @@ class MainActivity : AppCompatActivity() {
             isAppearanceLightStatusBars = false
             isAppearanceLightNavigationBars = false
         }
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                finish()
+            }
+        })
         bindViews()
         configureUi()
         bindActions()
@@ -776,7 +782,10 @@ class MainActivity : AppCompatActivity() {
                 swipeDownX = event.rawX
                 swipeDownY = event.rawY
                 pageSwipeActive = false
-                pageSwipeBlocked = !isInsideView(event.rawX, event.rawY, pageContainer) ||
+                val edgeMargin = 40.dp()
+                val screenWidth = resources.displayMetrics.widthPixels
+                val isEdgeGesture = event.rawX < edgeMargin || event.rawX > (screenWidth - edgeMargin)
+                pageSwipeBlocked = isEdgeGesture || !isInsideView(event.rawX, event.rawY, pageContainer) ||
                     allSeekBars().any { isInsideView(event.rawX, event.rawY, it) }
                 velocityTracker?.recycle()
                 velocityTracker = VelocityTracker.obtain().also { it.addMovement(event) }
