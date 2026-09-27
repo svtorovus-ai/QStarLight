@@ -707,19 +707,6 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
 
     private fun activateSafetyFallback(reason: String) {
         if (remoteTakeover || strobeActive) return
-        // During the initial pair-up the lamps can briefly disconnect while
-        // Android is still discovering/subscribing.  Treating that as a real
-        // runtime failure turns a normal yellow welcome into white failsafe.
-        if (bootPending || startupPending || welcomeInProgress || welcomeWaitingForOff) {
-            DiagnosticLog.write("BLE", "skip failsafe while welcome is pending: $reason")
-            scheduleReconnect(250)
-            return
-        }
-        if (SystemClock.elapsedRealtime() < safetyArmedAtElapsed) {
-            DiagnosticLog.write("BLE", "skip failsafe during startup settle: $reason")
-            scheduleReconnect(250)
-            return
-        }
         stopStrobeInternal(restore = false)
         safetyFallbackActive = true
         latestCct = null
