@@ -83,38 +83,61 @@ class GitHubUpdateWorker(
     }
 
     private fun checkForUpdate() {
-        val release = getJson(LATEST_RELEASE_URL)
-        val tag = release.optString("tag_name").removePrefix("v")
-        if (!isNewer(tag, UpdateManager.versionName(applicationContext))) {
+        var tag: String? = null
+        var downloadUrl: String? = null
+        var checksumUrl: String? = null
+
+        // Method 1: Try GitHub REST API
+        runCatching {
+            val release = getJson(LATEST_RELEASE_URL)
+            tag = release.optString("tag_name").removePrefix("v")
+            val assets = release.optJSONArray("assets")
+            if (assets != null) {
+                for (i in 0 until assets.length()) {
+                    val asset = assets.optJSONObject(i) ?: continue
+                    when (asset.optString("name")) {
+                        "QStarLight.apk" -> downloadUrl = asset.optString("browser_download_url")
+                        "QStarLight.apk.sha256" -> checksumUrl = asset.optString("browser_download_url")
+                    }
+                }
+            }
+        }
+
+        // Method 2: Fallback to GitHub Web Releases Redirect (No API Rate Limits)
+        if (tag.isNullOrBlank() || downloadUrl == null) {
+            runCatching {
+                val tagFromWeb = getLatestTagFromWeb()
+                if (tagFromWeb != null && tagFromWeb.isNotBlank()) {
+                    tag = tagFromWeb
+                    downloadUrl = "https://github.com/svtorovus-ai/QStarLight/releases/download/v$tagFromWeb/QStarLight.apk"
+                    checksumUrl = "https://github.com/svtorovus-ai/QStarLight/releases/download/v$tagFromWeb/QStarLight.apk.sha256"
+                }
+            }
+        }
+
+        val finalTag = tag?.takeIf { it.isNotBlank() } ?: error("Не вдалося отримати версію релізу з GitHub")
+        if (!isNewer(finalTag, UpdateManager.versionName(applicationContext))) {
             UpdateScheduler.report("Встановлено актуальну версію v${UpdateManager.versionName(applicationContext)}")
             return
         }
 
-        val assets = release.optJSONArray("assets") ?: error("У релізі немає файлів")
-        var downloadUrl: String? = null
-        var checksumUrl: String? = null
-        for (i in 0 until assets.length()) {
-            val asset = assets.optJSONObject(i) ?: continue
-            when (asset.optString("name")) {
-                "QStarLight.apk" -> downloadUrl = asset.optString("browser_download_url")
-                "QStarLight.apk.sha256" -> checksumUrl = asset.optString("browser_download_url")
-            }
-        }
         val url = downloadUrl?.takeIf { it.startsWith("https://") } ?: error("APK у релізі ще не доступний")
-        UpdateScheduler.report("Завантажую QStarLight v$tag…")
+        UpdateScheduler.report("Завантажую QStarLight v$finalTag…")
         val file = File(UpdateManager.updateDir(applicationContext), "github-latest.apk")
         download(url, file)
 
         checksumUrl?.takeIf { it.startsWith("https://") }?.let { checksumAsset ->
-            val expected = downloadText(checksumAsset)
-                .trim()
-                .substringBefore(' ')
-                .lowercase()
-            if (expected.length == 64 && expected.any { it != '0' }) {
-                val actual = UpdateManager.sha256(file).lowercase()
-                if (actual != expected) {
-                    file.delete()
-                    throw IllegalStateException("GitHub update checksum mismatch")
+            runCatching {
+                val expected = downloadText(checksumAsset)
+                    .trim()
+                    .substringBefore(' ')
+                    .lowercase()
+                if (expected.length == 64 && expected.any { it != '0' }) {
+                    val actual = UpdateManager.sha256(file).lowercase()
+                    if (actual != expected) {
+                        file.delete()
+                        throw IllegalStateException("GitHub update checksum mismatch")
+                    }
                 }
             }
         }
@@ -131,8 +154,33 @@ class GitHubUpdateWorker(
         }
 
         // Root/system devices can install silently. Stock Android will show its required confirmation UI.
-        UpdateScheduler.report("v$tag перевірено • передаю системі для встановлення")
+        UpdateScheduler.report("v$finalTag перевірено • передаю системі для встановлення")
         UpdateManager.requestInstall(applicationContext, file, tryRoot = true)
+    }
+
+    private fun getLatestTagFromWeb(): String? {
+        val webUrl = "https://github.com/svtorovus-ai/QStarLight/releases/latest"
+        val conn = (URL(webUrl).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 8_000
+            readTimeout = 12_000
+            instanceFollowRedirects = false
+            setRequestProperty("User-Agent", "QStarLight/" + UpdateManager.versionName(applicationContext))
+            setRequestProperty("Cache-Control", "no-cache")
+        }
+        return try {
+            val code = conn.responseCode
+            val location = conn.getHeaderField("Location").orEmpty()
+            if ((code in 300..399 || location.contains("/tag/")) && location.isNotEmpty()) {
+                location.substringAfterLast("/tag/").removePrefix("v").trim()
+            } else {
+                val finalUrl = conn.url.toString()
+                if (finalUrl.contains("/tag/")) {
+                    finalUrl.substringAfterLast("/tag/").removePrefix("v").trim()
+                } else null
+            }
+        } finally {
+            conn.disconnect()
+        }
     }
 
     private fun getJson(url: String): JSONObject {
