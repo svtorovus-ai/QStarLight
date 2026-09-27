@@ -765,15 +765,20 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
     private fun pumpLatestCct() {
         if (sendingCct || strobeActive) return
         if (!allSelectedReady()) { scheduleReconnect(); return }
-        val desired = latestCct ?: return
-        latestCct = null
+        val desired = latestCct ?: (prefs.white to prefs.brightness)
         sendingCct = true
-        sendFrameAll(QStarProtocol.cctFrame(desired.first, desired.second)) {
+        sendFrameAllResult(QStarProtocol.cctFrame(desired.first, desired.second)) { ok ->
             sendingCct = false
-            if (latestCct != null) {
-                handler.postDelayed({ pumpLatestCct() }, 60)
-            } else if (oneShot) {
-                shutdownSoon()
+            if (ok) {
+                if (latestCct == desired) latestCct = null
+                if (latestCct != null) {
+                    handler.postDelayed({ pumpLatestCct() }, 60)
+                } else if (oneShot) {
+                    shutdownSoon()
+                }
+            } else {
+                latestCct = desired
+                handler.postDelayed({ pumpLatestCct() }, 150)
             }
         }
     }
@@ -913,19 +918,18 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         startupPending = false
         welcomeWaitingForOff = false
 
-        // Restore user's previous settings!
-        prefs.power = welcomeSavedPower
-        prefs.white = welcomeSavedWhite
-        prefs.brightness = welcomeSavedBrightness
+        val desiredPower = prefs.power
+        val desiredWhite = prefs.white
+        val desiredBrightness = prefs.brightness
 
-        if (welcomeSavedPower) {
-            sendFrameAllSimultaneous(QStarProtocol.POWER_ON) {
-                sendFrameAllSimultaneous(QStarProtocol.cctFrame(welcomeSavedWhite, welcomeSavedBrightness)) {
-                    if (prefs.role() == BlePrefs.Role.HUB) hubTransport?.publishStatus("QStar готові") else shutdownSoon()
-                }
+        if (desiredPower) {
+            sendPower(true) {
+                latestCct = desiredWhite to desiredBrightness
+                pumpLatestCct()
+                if (prefs.role() == BlePrefs.Role.HUB) hubTransport?.publishStatus("QStar готові") else shutdownSoon()
             }
         } else {
-            sendFrameAllSimultaneous(QStarProtocol.POWER_OFF) {
+            sendPower(false) {
                 if (prefs.role() == BlePrefs.Role.HUB) hubTransport?.publishStatus("QStar готові") else shutdownSoon()
             }
         }
