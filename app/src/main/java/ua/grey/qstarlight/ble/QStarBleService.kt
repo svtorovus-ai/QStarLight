@@ -527,7 +527,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
                     connectingMac = null
                     scheduleReconnect(350)
                 }
-            }, 12000)
+            }, 6000)
             return
         }
         if (allSelectedReady()) onAllReady() else scheduleReconnect()
@@ -541,7 +541,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
             return
         }
         if (reconnectScheduled || remoteTakeover) return
-        val needed = interactive || bootPending || welcomeWaitingForOff || oneShot || latestCct != null || pendingAfterReady != null
+        val needed = interactive || bootPending || welcomeWaitingForOff || oneShot || latestCct != null || pendingAfterReady != null || strobeActive || prefs.keepConnected || prefs.role() == BlePrefs.Role.HUB
         if (!needed) return
         reconnectScheduled = true
         handler.postDelayed({
@@ -649,33 +649,40 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
                 return@post
             }
 
-            val bothLampsWereOff = states.size == refs.size && states.all { it == false }
             bootPending = false
             startupPending = false
-            welcomeWaitingForOff = !bothLampsWereOff
+            welcomeWaitingForOff = false
             welcomeStateAttempts = 0
             DiagnosticLog.write(
                 "WELCOME",
-                "phone_or_hub_ready=${prefs.role()} states=${states.joinToString(",")} run=$bothLampsWereOff"
+                "phone_or_hub_ready=${prefs.role()} states=${states.joinToString(",")} run=true"
             )
-            if (bothLampsWereOff) {
-                // The saved color/power is only the previous UI state. It must not
-                // suppress the selected welcome profile after a real lamp power-off.
-                prefs.power = false
-                welcomeInProgress = true
-                runBootRoutine()
-            } else {
-                welcomeInProgress = false
-                finishReadyCycle()
-            }
+            welcomeInProgress = true
+            runBootRoutine()
         }
     }
 
     private fun finishReadyCycle() {
         val callback = pendingAfterReady
         pendingAfterReady = null
-        callback?.invoke()
-        pumpLatestCct()
+        if (callback != null) {
+            callback.invoke()
+        } else if (!strobeActive && !welcomeInProgress) {
+            if (latestCct != null) {
+                pumpLatestCct()
+            } else {
+                if (prefs.power) {
+                    sendPower(true) {
+                        latestCct = prefs.white to prefs.brightness
+                        pumpLatestCct()
+                    }
+                } else {
+                    sendPower(false)
+                }
+            }
+        } else {
+            pumpLatestCct()
+        }
         if (interactive && !rssiLoop) startRssiLoop()
     }
 
@@ -686,7 +693,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
     }
 
     private fun activateSafetyFallback(reason: String) {
-        if (remoteTakeover) return
+        if (remoteTakeover || strobeActive) return
         // During the initial pair-up the lamps can briefly disconnect while
         // Android is still discovering/subscribing.  Treating that as a real
         // runtime failure turns a normal yellow welcome into white failsafe.
@@ -1181,7 +1188,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         // runtime failure.  Failsafe is valid only after both lamps were
         // READY together; otherwise a normal GATT race turns yellow startup
         // into an unwanted white emergency state.
-        if (pairWasReady && !remoteTakeover) activateSafetyFallback("error:$message")
+        if (pairWasReady && !remoteTakeover && !strobeActive) activateSafetyFallback("error:$message")
         if (!remoteTakeover) scheduleReconnect(120)
     }
 
@@ -1200,7 +1207,7 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         readyMacs.remove(mac)
         lampPowerState.remove(mac)
         if (connectingMac == mac) connectingMac = null
-        if (pairWasReady && !remoteTakeover) activateSafetyFallback("disconnect:$status")
+        if (pairWasReady && !remoteTakeover && !strobeActive) activateSafetyFallback("disconnect:$status")
         if (prefs.role() == BlePrefs.Role.HUB && readyMacs.isEmpty() && !remoteTakeover) pairWasReady = false
         if (!remoteTakeover) scheduleReconnect(120)
     }

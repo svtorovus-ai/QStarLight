@@ -493,21 +493,9 @@ class RemoteLinkService : Service() {
             if (intent.hasExtra(EXTRA_MAC)) json.put("mac", intent.getStringExtra(EXTRA_MAC))
             sendLine(json)
             broadcast(EVENT_ROUTE, "Команда #$commandId через магнітолу", currentHost)
-        } else if (prefs.directControlActive()) {
-            dispatchDirect(intent)
-        } else if (cmd == ControlDispatcher.CMD_CONNECT) {
-            pendingConnectMissing = true
-            if (prefs.directControlActive() || prefs.directFallback) dispatchDirect(intent)
-            broadcast(EVENT_CONNECTING, "Підключаю відсутні пристрої…")
-        } else if (cmd == ControlDispatcher.CMD_CONNECT_DEVICE) {
-            // A tap on a lamp means "try this lamp now" even if the HUB is currently offline.
-            dispatchDirect(intent)
-            broadcast(EVENT_CONNECTING, "Підключаю вибрану фару…")
-        } else if (prefs.directFallback) {
-            dispatchDirect(intent)
-            broadcast(EVENT_ROUTE, "Магнітола offline, команда напряму")
         } else {
-            broadcast(EVENT_ERROR, "Магнітола offline. Увімкни прямий BLE або резервний канал.")
+            dispatchDirect(intent)
+            broadcast(EVENT_ROUTE, "Магнітола offline • команда напряму по BLE")
         }
     }
 

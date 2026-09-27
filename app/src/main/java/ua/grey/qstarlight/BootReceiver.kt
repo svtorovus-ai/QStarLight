@@ -39,8 +39,12 @@ class BootReceiver : BroadcastReceiver() {
             Intent.ACTION_USER_UNLOCKED,
             Intent.ACTION_MY_PACKAGE_REPLACED,
             Intent.ACTION_SCREEN_ON,
+            Intent.ACTION_POWER_CONNECTED,
             "android.intent.action.QUICKBOOT_POWERON",
             "com.htc.intent.action.QUICKBOOT_POWERON",
+            "android.intent.action.ACC_ON",
+            "com.syu.ms.action.ACC_ON",
+            "android.intent.action.MEDIA_MOUNTED",
             "android.intent.action.REBOOT"
         )
     }

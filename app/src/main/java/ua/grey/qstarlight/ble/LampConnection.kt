@@ -8,6 +8,7 @@ import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothGattService
 import android.bluetooth.BluetoothProfile
+import android.bluetooth.BluetoothStatusCodes
 import android.content.Context
 import android.os.Build
 import android.os.Handler
@@ -271,7 +272,7 @@ class LampConnection(
 
     private fun writeCharacteristic(g: BluetoothGatt, c: BluetoothGattCharacteristic, data: ByteArray): Boolean {
         return if (Build.VERSION.SDK_INT >= 33) {
-            g.writeCharacteristic(c, data, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT) == BluetoothGatt.GATT_SUCCESS
+            g.writeCharacteristic(c, data, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT) == BluetoothStatusCodes.SUCCESS
         } else {
             @Suppress("DEPRECATION")
             run {
@@ -284,7 +285,7 @@ class LampConnection(
 
     private fun writeDescriptor(g: BluetoothGatt, d: BluetoothGattDescriptor, data: ByteArray): Boolean {
         return if (Build.VERSION.SDK_INT >= 33) {
-            g.writeDescriptor(d, data) == BluetoothGatt.GATT_SUCCESS
+            g.writeDescriptor(d, data) == BluetoothStatusCodes.SUCCESS
         } else {
             @Suppress("DEPRECATION")
             run {
@@ -301,7 +302,8 @@ class LampConnection(
                 if (!g.discoverServices()) fail("discoverServices failed")
                 return
             }
-            if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+            if (newState == BluetoothProfile.STATE_DISCONNECTED || status != BluetoothGatt.GATT_SUCCESS) {
+                try { g.disconnect() } catch (_: Throwable) {}
                 try { g.close() } catch (_: Throwable) {}
                 if (!closed) {
                     setPhase(Phase.DISCONNECTED)
