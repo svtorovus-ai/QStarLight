@@ -66,6 +66,9 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
     private var welcomeCheckScheduled = false
     private var welcomeInProgress = false
     private var welcomeExecutedThisSession = false
+    private var welcomeSavedPower = true
+    private var welcomeSavedWhite = 100
+    private var welcomeSavedBrightness = 100
     private var welcomeWaitingForOff = false
     private var latestCct: Pair<Int, Int>? = null
     private var sendingCct = false
@@ -861,24 +864,24 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
 
     private fun runBootRoutine() {
         stopStrobeInternal(restore = false)
+        welcomeSavedPower = prefs.power
+        welcomeSavedWhite = prefs.white
+        welcomeSavedBrightness = prefs.brightness
+
         when (prefs.startupMode) {
             BlePrefs.StartupMode.OFF -> {
-                prefs.power = false
                 sendFrameAllSimultaneous(QStarProtocol.POWER_OFF) { finishBootRoutine() }
             }
             BlePrefs.StartupMode.RESTORE -> {
-                if (!prefs.power) {
+                if (!welcomeSavedPower) {
                     sendFrameAllSimultaneous(QStarProtocol.POWER_OFF) { finishBootRoutine() }
                 } else {
                     sendFrameAllSimultaneous(QStarProtocol.POWER_ON) {
-                        sendFrameAllSimultaneous(QStarProtocol.cctFrame(prefs.white, prefs.brightness)) { finishBootRoutine() }
+                        sendFrameAllSimultaneous(QStarProtocol.cctFrame(welcomeSavedWhite, welcomeSavedBrightness)) { finishBootRoutine() }
                     }
                 }
             }
             BlePrefs.StartupMode.START_ONLY -> {
-                prefs.power = true
-                prefs.white = prefs.startWhite
-                prefs.brightness = prefs.startBrightness
                 sendFrameAllSimultaneous(QStarProtocol.POWER_ON) {
                     sendFrameAllSimultaneous(QStarProtocol.cctFrame(prefs.startWhite, prefs.startBrightness)) { finishBootRoutine() }
                 }
@@ -893,13 +896,9 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
     }
 
     private fun runFadeBootRoutine(startWhite: Int, targetWhite: Int, brightness: Int) {
-        prefs.power = true
-        prefs.white = startWhite
-        prefs.brightness = brightness
         sendFrameAllSimultaneous(QStarProtocol.POWER_ON) {
             sendFrameAllSimultaneous(QStarProtocol.cctFrame(startWhite, brightness)) {
                 if (prefs.fadeDurationMs <= 0 || startWhite == targetWhite) {
-                    prefs.white = targetWhite
                     sendFrameAllSimultaneous(QStarProtocol.cctFrame(targetWhite, brightness)) { finishBootRoutine() }
                 } else {
                     val steps = prefs.fadeSteps.coerceAtLeast(2)
@@ -914,8 +913,6 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         val white = (startWhite + (targetWhite - startWhite) * step / total).coerceIn(0, 100)
         sendFrameAllSimultaneous(QStarProtocol.cctFrame(white, brightness)) {
             if (step >= total) {
-                prefs.white = targetWhite
-                prefs.brightness = brightness
                 finishBootRoutine()
             } else {
                 handler.postDelayed({ fadeStep(step + 1, total, startWhite, targetWhite, brightness, delayMs) }, delayMs.toLong())
@@ -928,7 +925,23 @@ class QStarBleService : Service(), LampConnection.Listener, HubTransport.Listene
         bootPending = false
         startupPending = false
         welcomeWaitingForOff = false
-        if (prefs.role() == BlePrefs.Role.HUB) hubTransport?.publishStatus("QStar готові") else shutdownSoon()
+
+        // Restore user's previous settings!
+        prefs.power = welcomeSavedPower
+        prefs.white = welcomeSavedWhite
+        prefs.brightness = welcomeSavedBrightness
+
+        if (welcomeSavedPower) {
+            sendFrameAllSimultaneous(QStarProtocol.POWER_ON) {
+                sendFrameAllSimultaneous(QStarProtocol.cctFrame(welcomeSavedWhite, welcomeSavedBrightness)) {
+                    if (prefs.role() == BlePrefs.Role.HUB) hubTransport?.publishStatus("QStar готові") else shutdownSoon()
+                }
+            }
+        } else {
+            sendFrameAllSimultaneous(QStarProtocol.POWER_OFF) {
+                if (prefs.role() == BlePrefs.Role.HUB) hubTransport?.publishStatus("QStar готові") else shutdownSoon()
+            }
+        }
     }
 
     private fun startStrobe() {
