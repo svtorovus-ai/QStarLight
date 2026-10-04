@@ -1,5 +1,9 @@
 # QStar Light
 
+> [!IMPORTANT]
+> **Перед змінами:** прочитай [00_READ_FIRST.md](00_READ_FIRST.md), [AGENTS.md](AGENTS.md) і [docs/PROJECT_GUIDE.md](docs/PROJECT_GUIDE.md).  
+> PHONE/HUB, BLE routing, sync revisions, background lifecycle, signing та updater є критичними контрактами.
+
 Current development version: **0.5.35**.
 
 Native Android app for two QStar/YOBIS PZ-05 BLE headlight controllers.
